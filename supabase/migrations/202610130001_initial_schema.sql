@@ -1,4 +1,4 @@
--- Care Connect MVP baseline migration. PostgreSQL 15+ / Supabase.
+-- AashrayaCare MVP baseline migration. PostgreSQL 15+ / Supabase.
 -- The supplied backend artifact was a schema README, not the referenced care_connect_schema.sql.
 -- This migration implements its documented domains and core relationships; reconcile against canonical DDL before production.
 create extension if not exists pgcrypto;

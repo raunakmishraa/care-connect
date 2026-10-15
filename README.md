@@ -1,6 +1,6 @@
-# Care Connect — responsive web MVP prototype
+# AashrayaCare — responsive web MVP prototype
 
-A responsive React + TypeScript + Vite frontend for the Care Connect launch plan: caregiver discovery, care-home enquiries, family workspace, caregiver workspace, facility workspace and staff/admin demo views. Visual tokens and core flow follow the supplied UI/UX blueprint, app-flow specification, PRD and technical requirements.
+A responsive React + TypeScript + Vite frontend for the AashrayaCare launch plan: caregiver discovery, care-home enquiries, family workspace, caregiver workspace, facility workspace and staff/admin demo views. Visual tokens and core flow follow the supplied UI/UX blueprint, app-flow specification, PRD and technical requirements.
 
 ## Run locally
 
