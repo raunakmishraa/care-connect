@@ -10,7 +10,20 @@ cp .env.example .env.local
 npm run dev
 ```
 
-Open the local URL printed by Vite. The app runs in **demo mode** without Supabase credentials. Demo actions are local-only and explicitly tell you when no real request/message/report has been sent.
+Open the local URL printed by Vite. The public marketing pages run without Supabase credentials. **Private routes stay locked unless Supabase authentication is configured and the signed-in account has an assigned database role.** The former client-side demo role selector has been removed because it was not an authorization boundary.
+
+## Authentication and route authorization
+
+Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in `.env.local`, create users through your trusted Supabase signup/invitation workflow, and assign roles in `public.user_roles` using a trusted administrative process. Do not allow users to write their own roles. The frontend checks the authenticated Supabase session and database-assigned roles before rendering private routes.
+
+- `/admin` and `/admin/*`: requires the exact `admin` role.
+- `/caregiver` and `/caregiver/*`: requires the `caregiver` role. Data access must remain scoped to the authenticated caregiver through RLS.
+- `/facility` and `/facility/*`: requires the `facility_manager` role. Data access must remain scoped to facilities owned by the authenticated manager through RLS.
+- `/app` and `/app/*`: requires the `family` role.
+- `/caregivers` and `/care-homes`: public directory pages.
+- `/caregivers/:id` and `/care-homes/:slug`: require an authenticated session.
+
+**Security limitation:** frontend route guards improve navigation and prevent accidental UI exposure; they are not a substitute for server-side authorization. Before production, verify every table and storage bucket has appropriate Supabase RLS/storage policies and that all privileged mutations run in trusted server-side functions. Do not ship secrets or trust role values supplied by browser state.
 
 ## Optional Supabase connection
 
@@ -31,15 +44,15 @@ The migration in `supabase/migrations/` is an **implementation baseline** aligne
 - `/care-homes`, `/care-homes/:slug` directory/detail
 - `/how-it-works`, `/safety`, `/help`
 - `/app`, `/app/recipients`, `/app/requests`, `/app/requests/new`, `/app/enquiries`, `/app/messages`
-- `/caregiver`, `/caregiver/requests`, `/caregiver/schedule`, `/caregiver/profile`
+- `/caregiver`, `/caregiver/requests`, `/caregiver/schedule`, `/caregiver/profile`, `/caregiver/messages`
 - `/facility`, `/facility/listing`, `/facility/enquiries`
 - `/admin`, `/admin/verifications`, `/admin/incidents`, `/admin/support`
 
-The role selector is a demo convenience, **not authorization**. Do not deploy with it as a security boundary.
+The previous role selector has been removed. Roles are read from `public.user_roles` for the authenticated Supabase user; users must not be able to grant themselves roles.
 
 ## Production blockers
 
-- Implement Supabase Auth flows and phone verification operations process.
+- Add account registration/invitation and phone verification operations processes; sign-in and session/role checks are now wired to Supabase Auth when configured.
 - Implement Edge Functions / transactional database functions for request creation, caregiver response + atomic booking creation, confirmation, cancellation, visit completion, payment adjustments, facility enquiries and restricted incident reporting.
 - Add comprehensive RLS policy tests. Review the baseline migration: staff authorization helpers and some write policies are intentionally not present; no production traffic should use it without a security review.
 - Add idempotency handling to all duplicate-sensitive mutations and map PostgreSQL exclusion violation `23P01` to a friendly scheduling conflict.
