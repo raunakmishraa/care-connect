@@ -67,3 +67,11 @@ The previous role selector has been removed. Roles are read from `public.user_ro
 - Palette based on blueprint: `#F7F9F8` background, `#FFFFFF` surface, `#172321` text, `#586864` secondary text, `#DCE5E1` border and `#167D72` primary teal. Dark theme uses blueprint dark tokens.
 - Language toggle (English/Nepali), Light/Dark/System theme, responsive layouts and reduced-motion support are included.
 - Sample rates and statuses are illustrative UI data only. No online payments are implemented; all amounts are NPR and displayed as estimates/payment records only.
+
+## Authentication signup flow
+
+New users can create a standard account from **Get started → Create an account**. Standard accounts are assigned the `family` role automatically; signing up does not grant caregiver, facility-manager, or admin access. Caregiver and care-home verification should be handled through separate application and review workflows.
+
+The migration `supabase/migrations/202610160001_auth_signup_profiles.sql` installs a Supabase Auth trigger that creates the `public.users`, `public.user_roles` (`family` only), and `public.family_profiles` rows for new signups. Apply the baseline schema migration first, then this migration, to the same Supabase project used by `VITE_SUPABASE_URL`. If the baseline schema has not been deployed, signup may create an Auth user but the application profile/role setup will fail. Review migrations before applying them to production.
+
+Email confirmation behavior follows the Supabase project's **Authentication → Providers → Email** settings. When confirmation is enabled, users must confirm their email before signing in; this is separate from caregiver or facility verification.
