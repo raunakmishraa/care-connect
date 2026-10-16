@@ -20,3 +20,8 @@ html[data-theme="dark"]{color-scheme:dark;--bg:#101715;--surface:#19211f;--muted
 .auth-switch button { border: 0; background: transparent; color: var(--primary); padding: 0 2px; font-weight: 700; }
 .auth-switch button:hover { text-decoration: underline; }
 .modal-form label input { width: 100%; min-width: 0; }
+
+.auth-help-links{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin:12px 0 4px}
+.auth-help-links button{border:0;background:transparent;color:var(--primary);padding:3px 0;font-size:11px;font-weight:650;text-align:left}
+.auth-help-links button:hover{text-decoration:underline}
+.auth-help-links button:disabled{opacity:.55;cursor:not-allowed}
