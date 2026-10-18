@@ -14,7 +14,7 @@ Open the local URL printed by Vite. The public marketing pages run without Supab
 
 ## Authentication and route authorization
 
-Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY (or VITE_SUPABASE_PUBLISHABLE_KEY)` in `.env.local`, create users through your trusted Supabase signup/invitation workflow, and assign roles in `public.user_roles` using a trusted administrative process. Do not allow users to write their own roles. The frontend checks the authenticated Supabase session and database-assigned roles before rendering private routes.
+Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` or `VITE_SUPABASE_PUBLISHABLE_KEY` in `.env.local`, create users through your trusted Supabase signup/invitation workflow, and assign roles in `public.user_roles` using a trusted administrative process. Do not allow users to write their own roles. The frontend checks the authenticated Supabase session and database-assigned roles before rendering private routes.
 
 - `/admin` and `/admin/*`: requires the exact `admin` role.
 - `/caregiver` and `/caregiver/*`: requires the `caregiver` role. Data access must remain scoped to the authenticated caregiver through RLS.
@@ -27,7 +27,7 @@ Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY (or VITE_SUPABASE_PUBLISHABL
 
 ## Optional Supabase connection
 
-Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY (or VITE_SUPABASE_PUBLISHABLE_KEY)` in `.env.local`. Only the public anon/publishable key belongs in a browser build. Never use a service-role key in `VITE_*` or ship it to the client.
+Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` or `VITE_SUPABASE_PUBLISHABLE_KEY` in `.env.local`. Only the public anon/publishable key belongs in a browser build. Never use a service-role key in `VITE_*` or ship it to the client.
 
 Apply migrations using Supabase CLI after reviewing them:
 
