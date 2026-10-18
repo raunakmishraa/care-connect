@@ -14,7 +14,7 @@ Open the local URL printed by Vite. The public marketing pages run without Supab
 
 ## Authentication and route authorization
 
-Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in `.env.local`, create users through your trusted Supabase signup/invitation workflow, and assign roles in `public.user_roles` using a trusted administrative process. Do not allow users to write their own roles. The frontend checks the authenticated Supabase session and database-assigned roles before rendering private routes.
+Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY (or VITE_SUPABASE_PUBLISHABLE_KEY)` in `.env.local`, create users through your trusted Supabase signup/invitation workflow, and assign roles in `public.user_roles` using a trusted administrative process. Do not allow users to write their own roles. The frontend checks the authenticated Supabase session and database-assigned roles before rendering private routes.
 
 - `/admin` and `/admin/*`: requires the exact `admin` role.
 - `/caregiver` and `/caregiver/*`: requires the `caregiver` role. Data access must remain scoped to the authenticated caregiver through RLS.
@@ -27,7 +27,7 @@ Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in `.env.local`, create use
 
 ## Optional Supabase connection
 
-Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in `.env.local`. Only the public anon/publishable key belongs in a browser build. Never use a service-role key in `VITE_*` or ship it to the client.
+Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY (or VITE_SUPABASE_PUBLISHABLE_KEY)` in `.env.local`. Only the public anon/publishable key belongs in a browser build. Never use a service-role key in `VITE_*` or ship it to the client.
 
 Apply migrations using Supabase CLI after reviewing them:
 
@@ -75,3 +75,14 @@ New users can create a standard account from **Get started → Create an account
 The migration `supabase/migrations/202610160001_auth_signup_profiles.sql` installs a Supabase Auth trigger that creates the `public.users`, `public.user_roles` (`family` only), and `public.family_profiles` rows for new signups. Apply the baseline schema migration first, then this migration, to the same Supabase project used by `VITE_SUPABASE_URL`. If the baseline schema has not been deployed, signup may create an Auth user but the application profile/role setup will fail. Review migrations before applying them to production.
 
 Email confirmation behavior follows the Supabase project's **Authentication → Providers → Email** settings. When confirmation is enabled, users must confirm their email before signing in; this is separate from caregiver or facility verification.
+
+
+## Troubleshooting authentication email delivery
+
+If the browser or a confirmation link displays `No API key found in request`, first check where the message appears:
+
+- **Inside the app during signup/reset:** verify the deployment environment contains the correct `VITE_SUPABASE_URL` and a public key in `VITE_SUPABASE_ANON_KEY` or `VITE_SUPABASE_PUBLISHABLE_KEY`. The key must belong to the same Supabase project as the URL. After changing variables, rebuild and redeploy the frontend.
+- **After clicking the confirmation/reset email link and the address bar is on `*.supabase.co`:** the Supabase Auth redirect is likely pointing to the wrong site. In Supabase Dashboard → Authentication → URL Configuration, set **Site URL** to the full frontend URL including `https://` and add the exact frontend origin (and local development origin) to **Redirect URLs**. The app requests `window.location.origin/` as the redirect target.
+- If a custom confirmation/recovery email template is used, ensure it redirects to the configured app URL instead of hard-coding the Supabase project URL. Supabase documents using `{{ .RedirectTo }}` in custom token-hash confirmation links.
+
+Email delivery is configured outside this repository. Supabase's built-in email sender is restricted to pre-authorized organization addresses and limited to 2 emails per hour. Configure a verified sender and custom SMTP in Authentication → SMTP Settings for reliable delivery. Then check Supabase Auth logs and your email provider's delivery/bounce logs. Verify sender-domain SPF/DKIM records, and check spam/junk. Do not disable confirmation just to hide a delivery issue.
