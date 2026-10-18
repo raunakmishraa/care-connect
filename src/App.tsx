@@ -3,6 +3,14 @@ import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { Activity, ArrowDownRight, ArrowLeft, ArrowRight, ArrowUpRight, BadgeCheck, Bell, CalendarDays, Check, CheckCircle2, ChevronDown, ChevronRight, Clock3, Compass, Heart, HeartHandshake, HelpCircle, Home, House, Languages, Leaf, ListFilter, LockKeyhole, LogIn, Menu, MessageCircle, Moon, MoreHorizontal, Search, Shield, ShieldCheck, SlidersHorizontal, Sparkles, Sun, UserRound, Users, Wallet, X, Bookmark, MapPin, HandHeart, ClipboardList, FileCheck2, Stethoscope, CircleHelp, AlertTriangle, Send, Star, Eye, EyeOff, LayoutDashboard, Settings, LogOut } from 'lucide-react';
 import { formatNPR, supabase } from './lib';
 
+const authErrorMessage = (message:string) => {
+  if (/no api key found|api key.{0,20}(missing|invalid)|invalid api key/i.test(message)) {
+    return 'Supabase did not receive a valid public API key. Check that VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY (or VITE_SUPABASE_PUBLISHABLE_KEY) are set for this deployment and belong to the same project, then rebuild and redeploy.';
+  }
+  return message;
+};
+
+
 type Caregiver={id:number;name:string;initials:string;role:string;area:string;years:number;rate:number;unit:string;languages:string[];services:string[];verified:string;availability:string;bio:string;color:string;reviews:number;rating:number};
 const caregivers:Caregiver[]=[
 {id:1,name:'Maya Shrestha',initials:'MS',role:'Companion & daily living support',area:'Lalitpur · Jawalakhel',years:6,rate:650,unit:'hour',languages:['नेपाली','English'],services:['Companionship','Daily living','Mobility support'],verified:'Identity reviewed',availability:'Available this week',bio:'Patient, thoughtful support with daily routines, light meals and friendly companionship. I work with families to keep routines familiar and comfortable.',color:'rose',reviews:18,rating:4.9},
@@ -43,7 +51,7 @@ function App(){
    if(!authEmail.trim()||!authPassword){notify('Enter your email and password.');return;}
    setAuthBusy(true);
    const {data,error}=await supabase.auth.signInWithPassword({email:authEmail.trim(),password:authPassword});
-   if(error||!data.user){setAuthBusy(false);notify(error?.message||'Unable to sign in.');return;}
+   if(error||!data.user){setAuthBusy(false);notify(authErrorMessage(error?.message||'Unable to sign in.'));return;}
    const {data:roleRows,error:roleError}=await supabase.from('user_roles').select('role').eq('user_id',data.user.id);
    const roles=roleError?[]:(roleRows||[]).map((r:any)=>String(r.role));
    setSignedIn(true);setAuthUserId(data.user.id);setUserRoles(roles);
@@ -67,7 +75,7 @@ function App(){
    setAuthBusy(true);
    const {data,error}=await supabase.auth.signUp({email:authEmail.trim(),password:authPassword,options:{data:{full_name:authFullName.trim(),account_type:'family'},emailRedirectTo:window.location.origin+'/'}});
    setAuthBusy(false);
-   if(error){notify(error.message);return;}
+   if(error){notify(authErrorMessage(error.message));return;}
    setAuthPassword('');setAuthConfirmPassword('');
    if(data.session&&data.user){setModal(null);notify('Your account was created. You can start as a family user; caregiver and care-home applications are reviewed separately.');}
    else{notify('Account created. Check your email to confirm your address, then sign in. Caregiver and care-home verification is only needed if you apply for those roles.');setAuthMode('signin');}
@@ -78,7 +86,7 @@ function App(){
    setAuthBusy(true);
    const {error}=await supabase.auth.resetPasswordForEmail(authEmail.trim(),{redirectTo:window.location.origin+'/'});
    setAuthBusy(false);
-   if(error){notify(error.message);return;}
+   if(error){notify(authErrorMessage(error.message));return;}
    notify('If an account exists for that email, a password-reset link has been sent. Check your inbox and spam folder.');
  };
  const resendConfirmation=async()=>{
@@ -87,7 +95,7 @@ function App(){
    setAuthBusy(true);
    const {error}=await supabase.auth.resend({type:'signup',email:authEmail.trim(),options:{emailRedirectTo:window.location.origin+'/' }});
    setAuthBusy(false);
-   if(error){notify(error.message);return;}
+   if(error){notify(authErrorMessage(error.message));return;}
    notify('If this address has a pending confirmation, a new confirmation email has been requested. Check spam and promotions folders too.');
  };
  const updatePassword=async()=>{
@@ -97,7 +105,7 @@ function App(){
    setAuthBusy(true);
    const {error}=await supabase.auth.updateUser({password:authPassword});
    setAuthBusy(false);
-   if(error){notify(error.message);return;}
+   if(error){notify(authErrorMessage(error.message));return;}
    setAuthPassword('');setAuthConfirmPassword('');setModal(null);setAuthMode('signin');
    notify('Your password has been updated. You can now sign in with your new password.');
  };
