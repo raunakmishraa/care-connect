@@ -1650,19 +1650,19 @@ function App() {
                 <p className="muted" style={{ margin: "4px 0 0" }}>Family account</p>
               </div>
             </div>
-            <form className="auth-form" onSubmit={(event) => { event.preventDefault(); void saveProfile(); }}>
-              <label className="form-field">
+            <form style={{ display: "grid", gap: 18 }} onSubmit={(event) => { event.preventDefault(); void saveProfile(); }}>
+              <label style={{ display: "grid", gap: 7, fontWeight: 600 }}>
                 <span>Full name</span>
-                <input value={profileName} onChange={(event) => setProfileName(event.target.value)} autoComplete="name" required maxLength={160} placeholder="Enter your full name" />
+                <input style={{ width: "100%", padding: "12px 14px", border: "1px solid var(--border, #d5ddd8)", borderRadius: 10, font: "inherit", boxSizing: "border-box" }} value={profileName} onChange={(event) => setProfileName(event.target.value)} autoComplete="name" required maxLength={160} placeholder="Enter your full name" />
               </label>
               <label className="form-field">
                 <span>Email address</span>
-                <input type="email" value={profileEmail} readOnly disabled />
+                <input style={{ width: "100%", padding: "12px 14px", border: "1px solid var(--border, #d5ddd8)", borderRadius: 10, font: "inherit", boxSizing: "border-box" }} type="email" value={profileEmail} readOnly disabled />
                 <small className="muted">Email changes require a separate email verification process.</small>
               </label>
               <label className="form-field">
                 <span>Phone number</span>
-                <input type="tel" value={profilePhone} onChange={(event) => setProfilePhone(event.target.value)} autoComplete="tel" maxLength={30} placeholder="Add a contact number (optional)" />
+                <input style={{ width: "100%", padding: "12px 14px", border: "1px solid var(--border, #d5ddd8)", borderRadius: 10, font: "inherit", boxSizing: "border-box" }} type="tel" value={profilePhone} onChange={(event) => setProfilePhone(event.target.value)} autoComplete="tel" maxLength={30} placeholder="Add a contact number (optional)" />
               </label>
               <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
                 <button className="button button-primary" type="submit" disabled={profileSaving}>
