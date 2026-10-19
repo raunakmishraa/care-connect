@@ -444,6 +444,80 @@ function App() {
       subscription.unsubscribe();
     };
   }, []);
+
+  // Re-read the signed-in user's roles when navigating between pages.
+  // This handles roles assigned or corrected while an existing session is active.
+  useEffect(() => {
+    const needsWorkspaceRole =
+      path === "/app" ||
+      path.startsWith("/app/") ||
+      path === "/caregiver" ||
+      path.startsWith("/caregiver/") ||
+      path === "/facility" ||
+      path.startsWith("/facility/") ||
+      path === "/admin" ||
+      path.startsWith("/admin/");
+    if (!supabase || !needsWorkspaceRole) return;
+
+    let active = true;
+    const refreshWorkspaceRoles = async () => {
+      setAuthLoading(true);
+      const { data: sessionData, error: sessionError } =
+        await supabase.auth.getSession();
+      if (!active) return;
+      if (sessionError || !sessionData.session?.user) {
+        setUserRoles([]);
+        setRole(null);
+        setAuthLoading(false);
+        return;
+      }
+
+      const userId = sessionData.session.user.id;
+      setSignedIn(true);
+      setAuthUserId(userId);
+      const { data, error } = await supabase
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", userId);
+
+      if (!active) return;
+      if (error) {
+        console.error("Unable to refresh account roles:", error.message);
+        setUserRoles([]);
+        setRole(null);
+        setAuthLoading(false);
+        return;
+      }
+
+      const roles = (data || [])
+        .map((row: { role: string }) => String(row.role).trim().toLowerCase());
+      setUserRoles(roles);
+      const chosen = roles.includes("admin")
+        ? "admin"
+        : roles.includes("caregiver")
+          ? "caregiver"
+          : roles.includes("facility_manager")
+            ? "facility"
+            : roles.includes("family")
+              ? "family"
+              : null;
+      setRole(chosen);
+      setAuthLoading(false);
+    };
+
+    void refreshWorkspaceRoles().catch((error) => {
+      if (!active) return;
+      console.error("Unable to refresh account roles:", error);
+      setUserRoles([]);
+      setRole(null);
+      setAuthLoading(false);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [path]);
+
   const notify = (s: string) => setToast(s);
   const go = (p: string) => navigate(p);
   const openAuth = (mode: "signin" | "signup") => {
