@@ -295,6 +295,10 @@ function App() {
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [authFullName, setAuthFullName] = useState("");
+  const [profileName, setProfileName] = useState("");
+  const [profilePhone, setProfilePhone] = useState("");
+  const [profileEmail, setProfileEmail] = useState("");
+  const [profileSaving, setProfileSaving] = useState(false);
   const [authConfirmPassword, setAuthConfirmPassword] = useState("");
   const [authMode, setAuthMode] = useState<
     "signin" | "signup" | "forgot" | "reset"
@@ -517,6 +521,62 @@ function App() {
       active = false;
     };
   }, [path]);
+
+  useEffect(() => {
+    if (!supabase || !authUserId || !signedIn) {
+      setProfileName("");
+      setProfilePhone("");
+      setProfileEmail("");
+      return;
+    }
+    let active = true;
+    void (async () => {
+      const [{ data: authData }, { data, error }] = await Promise.all([
+        supabase.auth.getUser(),
+        supabase.from("users").select("full_name, phone, email").eq("id", authUserId).maybeSingle(),
+      ]);
+      if (!active) return;
+      const authUser = authData.user;
+      const name = String(data?.full_name || authUser?.user_metadata?.full_name || authUser?.email?.split("@")[0] || "");
+      setProfileName(name);
+      setProfilePhone(String(data?.phone || ""));
+      setProfileEmail(String(authUser?.email || data?.email || ""));
+    })().catch((error) => console.error("Unable to load profile:", error));
+    return () => { active = false; };
+  }, [authUserId, signedIn]);
+
+  const saveProfile = async () => {
+    if (!supabase || !authUserId) return;
+    const name = profileName.trim();
+    if (!name) {
+      notify("Please enter your full name.");
+      return;
+    }
+    setProfileSaving(true);
+    const { error } = await supabase
+      .from("users")
+      .update({ full_name: name, phone: profilePhone.trim() || null, updated_at: new Date().toISOString() })
+      .eq("id", authUserId);
+    setProfileSaving(false);
+    if (error) {
+      console.error("Unable to save profile:", error.message);
+      notify("We couldn't save your profile. Check your connection and try again.");
+      return;
+    }
+    if (supabase) {
+      const { error: authError } = await supabase.auth.updateUser({ data: { full_name: name } });
+      if (authError) console.warn("Profile saved, but auth metadata was not updated:", authError.message);
+    }
+    notify("Profile information updated.");
+  };
+
+  const displayName = profileName.trim() || authFullName.trim() || profileEmail.split("@")[0] || "";
+  const profileInitials = displayName
+    .split(/\\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part.charAt(0).toUpperCase())
+    .join("") || "U";
 
   const notify = (s: string) => setToast(s);
   const go = (p: string) => navigate(p);
@@ -909,7 +969,7 @@ function App() {
                 }
                 aria-label="Open dashboard"
               >
-                RM
+                {profileInitials}
               </button>
             ) : (
               <button
@@ -919,25 +979,15 @@ function App() {
                 {t.signIn}
               </button>
             )}
-            <button
-              className="button button-primary header-cta"
-              onClick={() =>
-                signedIn
-                  ? go(
-                      role === "admin"
-                        ? "/admin"
-                        : role === "caregiver"
-                          ? "/caregiver"
-                          : role === "facility"
-                            ? "/facility"
-                            : "/app",
-                    )
-                  : openAuth("signup")
-              }
-            >
-              {t.getStarted}
-              <ArrowRight size={16} />
-            </button>
+            {!signedIn && (
+              <button
+                className="button button-primary header-cta"
+                onClick={() => openAuth("signup")}
+              >
+                {t.getStarted}
+                <ArrowRight size={16} />
+              </button>
+            )}
             <button
               className="icon-button mobile-menu"
               onClick={() => setMobileOpen(!mobileOpen)}
@@ -1045,6 +1095,7 @@ function App() {
                     ["/app/recipients", Users, "Care recipients"],
                     ["/app/enquiries", House, "Care-home enquiries"],
                     ["/app/messages", MessageCircle, "Messages"],
+                    ["/app/profile", UserRound, "My profile"],
                   ]
                 : workspaceRole === "caregiver"
                   ? [
@@ -1583,6 +1634,46 @@ function App() {
     </div>
   );
   function renderWorkspace() {
+    if (path === "/app/profile") {
+      return (
+        <>
+          <PageHeader
+            eyebrow="ACCOUNT SETTINGS"
+            title="My profile"
+            subtitle="View and update the personal information associated with your AashrayaCare account."
+          />
+          <section className="panel" style={{ maxWidth: 760, padding: 28 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 24 }}>
+              <div className="avatar-btn" style={{ width: 64, height: 64, minWidth: 64, fontSize: 20, display: "grid", placeItems: "center" }} aria-hidden="true">{profileInitials}</div>
+              <div>
+                <h2 style={{ margin: 0 }}>{displayName || "Your profile"}</h2>
+                <p className="muted" style={{ margin: "4px 0 0" }}>Family account</p>
+              </div>
+            </div>
+            <form style={{ display: "grid", gap: 18 }} onSubmit={(event) => { event.preventDefault(); void saveProfile(); }}>
+              <label style={{ display: "grid", gap: 7, fontWeight: 600 }}>
+                <span>Full name</span>
+                <input style={{ width: "100%", padding: "12px 14px", border: "1px solid var(--border, #d5ddd8)", borderRadius: 10, font: "inherit", boxSizing: "border-box" }} value={profileName} onChange={(event) => setProfileName(event.target.value)} autoComplete="name" required maxLength={160} placeholder="Enter your full name" />
+              </label>
+              <label className="form-field">
+                <span>Email address</span>
+                <input style={{ width: "100%", padding: "12px 14px", border: "1px solid var(--border, #d5ddd8)", borderRadius: 10, font: "inherit", boxSizing: "border-box" }} type="email" value={profileEmail} readOnly disabled />
+                <small className="muted">Email changes require a separate email verification process.</small>
+              </label>
+              <label className="form-field">
+                <span>Phone number</span>
+                <input style={{ width: "100%", padding: "12px 14px", border: "1px solid var(--border, #d5ddd8)", borderRadius: 10, font: "inherit", boxSizing: "border-box" }} type="tel" value={profilePhone} onChange={(event) => setProfilePhone(event.target.value)} autoComplete="tel" maxLength={30} placeholder="Add a contact number (optional)" />
+              </label>
+              <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
+                <button className="button button-primary" type="submit" disabled={profileSaving}>
+                  {profileSaving ? "Saving…" : "Save changes"}
+                </button>
+              </div>
+            </form>
+          </section>
+        </>
+      );
+    }
     if (path === "/app/requests/new") {
       return (
         <RequestWizardPage
