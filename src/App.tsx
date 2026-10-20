@@ -998,21 +998,42 @@ function App() {
           </div>
         </div>
         {mobileOpen && (
-          <nav className="mobile-nav">
+          <nav className="mobile-nav" aria-label="Mobile navigation">
             {publicNav.map(([p, label]) => (
-              <Link key={p} to={p}>
+              <Link key={p} to={p} onClick={() => setMobileOpen(false)}>
                 {label}
                 <ChevronRight size={16} />
               </Link>
             ))}
-            <Link to="/app">
-              Dashboard
-              <ChevronRight size={16} />
-            </Link>
-            <button onClick={() => openAuth("signin")}>{t.signIn}</button>
-            <button onClick={() => openAuth("signup")}>
-              Create an account
-            </button>
+            {signedIn ? (
+              <>
+                <Link
+                  to={role === "admin" ? "/admin" : role === "caregiver" ? "/caregiver" : role === "facility" ? "/facility" : "/app"}
+                  onClick={() => setMobileOpen(false)}
+                >
+                  My dashboard
+                  <ChevronRight size={16} />
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMobileOpen(false);
+                    void signOut();
+                  }}
+                >
+                  <span>Sign out</span>
+                  <LogOut size={16} />
+                </button>
+              </>
+            ) : (
+              <>
+                <button type="button" onClick={() => { setMobileOpen(false); openAuth("signin"); }}>{t.signIn}</button>
+                <button type="button" onClick={() => { setMobileOpen(false); openAuth("signup"); }}>
+                  Create an account
+                  <ArrowRight size={16} />
+                </button>
+              </>
+            )}
           </nav>
         )}
       </header>
