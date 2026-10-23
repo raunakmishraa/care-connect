@@ -124,3 +124,19 @@ html[data-theme="dark"]{color-scheme:dark;--bg:#101715;--surface:#19211f;--muted
 .application-status-icon{display:grid;place-items:center;width:46px;height:46px;border-radius:13px;background:var(--soft);color:var(--primary);margin-bottom:17px}
 .footer-top{grid-template-columns:1.3fr 1fr 1fr 1fr 1.1fr}
 @media(max-width:760px){.application-fields{grid-template-columns:minmax(0,1fr)}.application-field-wide{grid-column:auto}.application-services{grid-template-columns:minmax(0,1fr)}.application-submit-row{align-items:stretch;flex-direction:column}.application-submit-row .button{width:100%}.provider-application-form{padding:18px}.application-status-card{padding:20px}.footer-top{grid-template-columns:repeat(2,minmax(0,1fr))}.footer-top .footer-brand,.footer-top .footer-note{grid-column:1/-1}}
+
+
+/* Admin provider application review */
+.provider-review-list{display:grid;gap:16px}
+.provider-review-card{padding:22px;min-width:0}
+.provider-review-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
+.provider-review-heading h2{font-size:20px;margin:5px 0}
+.provider-review-heading p{margin:0;overflow-wrap:anywhere}
+.provider-review-details{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px 18px;margin:18px 0}
+.provider-review-details p{font-size:12px;margin:0 0 7px;overflow-wrap:anywhere}
+.provider-review-details p:last-child{grid-column:1/-1}
+.provider-review-notes{display:grid;gap:7px;font-size:12px;font-weight:650;margin:16px 0}
+.provider-review-notes textarea{width:100%;padding:11px 12px;border:1px solid var(--border);border-radius:9px;background:var(--surface);color:var(--text);font:inherit;font-weight:400}
+.provider-review-actions{flex-wrap:wrap;justify-content:flex-end}
+.provider-review-actions .button:disabled{opacity:.55;cursor:not-allowed}
+@media(max-width:650px){.provider-review-heading{flex-direction:column}.provider-review-details{grid-template-columns:minmax(0,1fr)}.provider-review-details p:last-child{grid-column:auto}.provider-review-actions{display:grid;grid-template-columns:minmax(0,1fr)}.provider-review-actions .button{width:100%}}
