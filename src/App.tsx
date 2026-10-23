@@ -646,25 +646,29 @@ function App() {
       notify("Add a note explaining what information is required.");
       return;
     }
-    const { data, error } = await supabase
-      .from("provider_applications")
-      .update({
-        status,
-        reviewer_notes: notes || null,
-        reviewed_by: authUserId,
-        reviewed_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", application.id)
-      .select("*")
-      .single();
+    const { error } = await supabase.rpc("admin_review_provider_application", {
+      p_application_id: application.id,
+      p_status: status,
+      p_reviewer_notes: notes || null,
+    });
     if (error) {
-      console.error("Unable to update provider application:", error.message);
-      notify("The review decision could not be saved. Check administrator permissions.");
+      console.error("Unable to review provider application:", error.message);
+      notify("The review decision could not be saved. Apply the provider-applications migration and verify administrator permissions.");
+      return;
+    }
+    const { data, error: refreshError } = await supabase
+      .from("provider_applications")
+      .select("*")
+      .eq("id", application.id)
+      .single();
+    if (refreshError || !data) {
+      notify("The review decision was saved, but the refreshed application could not be loaded.");
       return;
     }
     setProviderApplications((current) => current.map((item) => item.id === application.id ? data as ProviderApplicationRecord : item));
-    notify("Application review status updated. Provider roles and public listing publication are separate steps.");
+    notify(status === "approved"
+      ? "Application approved. Provider workspace access was assigned; the draft listing remains unpublished pending verification."
+      : "Application review status updated.");
   };
   const openAuth = (mode: "signin" | "signup") => {
     setAuthMode(mode);
