@@ -56,6 +56,7 @@ import {
   LogOut,
 } from "lucide-react";
 import { formatNPR, supabase } from "./lib";
+import ProviderApplication from "./ProviderApplication";
 
 const authErrorMessage = (message: string) => {
   if (
@@ -300,6 +301,7 @@ function App() {
   const [profileEmail, setProfileEmail] = useState("");
   const [profileSaving, setProfileSaving] = useState(false);
   const [authConfirmPassword, setAuthConfirmPassword] = useState("");
+  const [signupAccountType, setSignupAccountType] = useState<"family" | "caregiver" | "care_home">("family");
   const [authMode, setAuthMode] = useState<
     "signin" | "signup" | "forgot" | "reset"
   >("signin");
@@ -630,8 +632,15 @@ function App() {
     setModal(null);
     setAuthPassword("");
     const isDetail = /^\/(caregivers|care-homes)\/[^/]+\/?$/.test(path);
+    const requestedApplication = data.user.user_metadata?.account_type;
     if (isDetail) {
       go(path);
+    } else if (path.startsWith("/apply/") && roles.includes("family")) {
+      go(path);
+    } else if (path === "/" && roles.includes("family") && requestedApplication === "caregiver") {
+      go("/apply/caregiver");
+    } else if (path === "/" && roles.includes("family") && requestedApplication === "care_home") {
+      go("/apply/care-home");
     } else if (path.startsWith("/admin") && roles.includes("admin"))
       go("/admin");
     else if (path.startsWith("/caregiver") && roles.includes("caregiver"))
@@ -677,7 +686,7 @@ function App() {
       email: authEmail.trim(),
       password: authPassword,
       options: {
-        data: { full_name: authFullName.trim(), account_type: "family" },
+        data: { full_name: authFullName.trim(), account_type: signupAccountType },
         emailRedirectTo: window.location.origin + "/",
       },
     });
@@ -690,12 +699,21 @@ function App() {
     setAuthConfirmPassword("");
     if (data.session && data.user) {
       setModal(null);
-      notify(
-        "Your account was created. You can start as a family user; caregiver and care-home applications are reviewed separately.",
-      );
+      if (signupAccountType === "caregiver") {
+        go("/apply/caregiver");
+        notify("Your account is ready. Complete the caregiver application for review.");
+      } else if (signupAccountType === "care_home") {
+        go("/apply/care-home");
+        notify("Your account is ready. Complete the care-home listing application for review.");
+      } else {
+        go("/app");
+        notify("Your family account is ready. You can browse care options now.");
+      }
     } else {
       notify(
-        "Account created. If email confirmation is enabled, check your inbox and spam folder. If no email arrives, use Resend confirmation email after checking the project's SMTP settings. Caregiver and care-home verification is only needed if you apply for those roles.",
+        signupAccountType === "family"
+          ? "Account created. If email confirmation is enabled, confirm your email and sign in to continue."
+          : "Account created. Confirm your email if requested, then sign in to continue your provider application. Provider access is only granted after review."
       );
       setAuthMode("signin");
     }
@@ -807,8 +825,9 @@ function App() {
           : path === "/app" || path.startsWith("/app/")
             ? "family"
             : null;
+  const isProviderApplication = path === "/apply/caregiver" || path === "/apply/care-home";
   const routeNeedsAuth =
-    !!requiredRole || isCaregiverDetail || isCareHomeDetail;
+    !!requiredRole || isCaregiverDetail || isCareHomeDetail || isProviderApplication;
   const hasRequiredRole = !requiredRole || userRoles.includes(requiredRole);
   const routeAuthorized =
     !routeNeedsAuth || (signedIn && !authLoading && hasRequiredRole);
@@ -1273,6 +1292,12 @@ function App() {
           {path === "/help" && (
             <InfoPage type="help" onAction={() => setModal("incident")} />
           )}
+          {path === "/apply/caregiver" && (
+            <ProviderApplication type="caregiver" onNotify={notify} />
+          )}
+          {path === "/apply/care-home" && (
+            <ProviderApplication type="care_home" onNotify={notify} />
+          )}
         </>
       )}
       {!isWorkspace && (!routeNeedsAuth || routeAuthorized) && (
@@ -1295,6 +1320,11 @@ function App() {
               <Link to="/caregivers">Find caregivers</Link>
               <Link to="/care-homes">Care homes</Link>
               <Link to="/how-it-works">How it works</Link>
+            </div>
+            <div>
+              <b>Offer care</b>
+              <Link to="/apply/caregiver">Become a caregiver</Link>
+              <Link to="/apply/care-home">List a care home</Link>
             </div>
             <div>
               <b>Trust & support</b>
@@ -1414,6 +1444,30 @@ function App() {
                       ? "Create a regular account to explore care options. No caregiver or care-home verification is required unless you separately apply for one of those roles."
                       : "Sign in with your account. Workspace access is determined by roles assigned in the database; you cannot select or grant yourself a role."}
                   </p>
+                  {authMode === "signup" && (
+                    <div className="signup-account-types" role="group" aria-label="How would you like to use AashrayaCare?">
+                      <span className="form-label-title">I want to…</span>
+                      {([
+                        ["family", "Find care", "I’m looking for care for myself or someone I support."],
+                        ["caregiver", "Offer care", "I’m an individual caregiver applying to list my services."],
+                        ["care_home", "List a care home", "I represent a care home or care facility."],
+                      ] as const).map(([value, title, description]) => (
+                        <button
+                          key={value}
+                          type="button"
+                          className={signupAccountType === value ? "signup-type-card selected" : "signup-type-card"}
+                          aria-pressed={signupAccountType === value}
+                          onClick={() => setSignupAccountType(value)}
+                        >
+                          <strong>{title}</strong>
+                          <span>{description}</span>
+                        </button>
+                      ))}
+                      {signupAccountType !== "family" && (
+                        <p className="inline-note"><ShieldCheck size={16} /> You’ll create a normal account first, then submit an application. This selection does not grant provider access or publish a listing.</p>
+                      )}
+                    </div>
+                  )}
                   {authMode === "signup" && (
                     <label>
                       Full name
