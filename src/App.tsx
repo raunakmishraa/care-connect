@@ -2387,7 +2387,7 @@ function App() {
             subtitle="Review caregiver and care-home submissions. Decisions are recorded in the database."
           />
           <div className="notice-bar">
-            <LockKeyhole size={18} /> Applicant details are restricted to administrators. Approving an application does not automatically grant a provider role or publish a listing; those steps require the separate trusted approval process.
+            <LockKeyhole size={18} /> Applicant details are restricted to administrators. Approving an application through the admin-only database function assigns the appropriate provider workspace role and creates an unpublished draft profile. A separate verification and publication decision is still required before families can see the listing.
           </div>
           {providerApplicationsLoading ? (
             <div className="panel"><p>Loading provider applications…</p></div>
@@ -2447,7 +2447,7 @@ function App() {
                     <button className="button button-secondary small" disabled={!["submitted", "under_review", "action_required"].includes(application.status)} onClick={() => void reviewProviderApplication(application, "rejected")}>Reject</button>
                     <button className="button button-primary small" disabled={!["submitted", "under_review", "action_required"].includes(application.status)} onClick={() => void reviewProviderApplication(application, "approved")}>Approve application</button>
                   </div>
-                  {application.status === "approved" && <p className="inline-note"><ShieldCheck size={16} /> Approved status recorded. Assign the provider role and publish the listing only after completing the separate verification workflow.</p>}
+                  {application.status === "approved" && <p className="inline-note"><ShieldCheck size={16} /> Provider workspace access has been assigned. The listing remains unpublished until verification is complete.</p>}
                 </article>
               ))}
             </div>
