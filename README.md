@@ -86,3 +86,20 @@ If the browser or a confirmation link displays `No API key found in request`, fi
 - If a custom confirmation/recovery email template is used, ensure it redirects to the configured app URL instead of hard-coding the Supabase project URL. Supabase documents using `{{ .RedirectTo }}` in custom token-hash confirmation links.
 
 Email delivery is configured outside this repository. Supabase's built-in email sender is restricted to pre-authorized organization addresses and limited to 2 emails per hour. Configure a verified sender and custom SMTP in Authentication → SMTP Settings for reliable delivery. Then check Supabase Auth logs and your email provider's delivery/bounce logs. Verify sender-domain SPF/DKIM records, and check spam/junk. Do not disable confirmation just to hide a delivery issue.
+
+## Provider applications
+
+The signup form now asks whether a person wants to **find care**, **offer care as an individual caregiver**, or **list a care home**. All signups still receive only the standard `family` role from the auth trigger. Caregiver and care-home choices route signed-in users to the relevant application form; when email confirmation is required, the chosen path is stored in Auth user metadata and used to route the user after sign-in.
+
+- `/apply/caregiver`: collects contact information, service area, experience, services and optional rate.
+- `/apply/care-home`: collects representative contact information, facility details, address, services, capacity, indicative fees and registration/licence reference.
+- `/admin/verifications`: lists provider applications and lets an authorized admin record submitted, information-required, rejected or approved decisions with review notes.
+- Applications are private to their applicant and authorized administrators through RLS. Only the admin-only database review function can grant the matching caregiver/facility workspace role after approval, and it creates an unpublished draft provider profile. A separate verification and listing-publication decision is still required before families can see the listing. Document uploads and evidence verification are not implemented by these forms.
+
+Apply the new migration to the same Supabase project configured for the app before testing submissions:
+
+```bash
+supabase db push
+```
+
+Migration: `supabase/migrations/202610230001_provider_applications.sql`. Review the SQL and existing RLS policies before production deployment.

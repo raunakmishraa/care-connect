@@ -56,6 +56,7 @@ import {
   LogOut,
 } from "lucide-react";
 import { formatNPR, supabase } from "./lib";
+import ProviderApplication from "./ProviderApplication";
 
 const authErrorMessage = (message: string) => {
   if (
@@ -66,6 +67,32 @@ const authErrorMessage = (message: string) => {
     return "Supabase did not receive a valid public API key. Check that VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY (or VITE_SUPABASE_PUBLISHABLE_KEY) are set for this deployment and belong to the same project, then rebuild and redeploy.";
   }
   return message;
+};
+
+type ProviderApplicationRecord = {
+  id: string;
+  user_id: string;
+  application_type: "caregiver" | "care_home";
+  status: "submitted" | "under_review" | "action_required" | "approved" | "rejected";
+  applicant_name: string;
+  contact_email: string;
+  contact_phone: string;
+  service_area: string | null;
+  years_experience: number | null;
+  services: string[];
+  rate_amount: number | null;
+  rate_unit: string | null;
+  facility_name: string | null;
+  facility_type: string | null;
+  facility_address: string | null;
+  facility_description: string | null;
+  facility_services: string[];
+  facility_capacity: number | null;
+  monthly_fee: number | null;
+  registration_number: string | null;
+  additional_notes: string | null;
+  reviewer_notes: string | null;
+  created_at: string;
 };
 
 type Caregiver = {
@@ -300,6 +327,7 @@ function App() {
   const [profileEmail, setProfileEmail] = useState("");
   const [profileSaving, setProfileSaving] = useState(false);
   const [authConfirmPassword, setAuthConfirmPassword] = useState("");
+  const [signupAccountType, setSignupAccountType] = useState<"family" | "caregiver" | "care_home">("family");
   const [authMode, setAuthMode] = useState<
     "signin" | "signup" | "forgot" | "reset"
   >("signin");
@@ -352,6 +380,9 @@ function App() {
   const [incidentType, setIncidentType] = useState("Safety concern");
   const [incidentText, setIncidentText] = useState("");
   const [activeTab, setActiveTab] = useState("All");
+  const [providerApplications, setProviderApplications] = useState<ProviderApplicationRecord[]>([]);
+  const [providerApplicationsLoading, setProviderApplicationsLoading] = useState(false);
+  const [providerApplicationNotes, setProviderApplicationNotes] = useState<Record<string, string>>({});
   const t = lang === "en" ? en : ne;
   const location = useLocation();
   const navigate = useNavigate();
@@ -545,6 +576,28 @@ function App() {
     return () => { active = false; };
   }, [authUserId, signedIn]);
 
+  useEffect(() => {
+    if (path !== "/admin/verifications" || !supabase || !userRoles.includes("admin")) return;
+    let active = true;
+    setProviderApplicationsLoading(true);
+    void supabase
+      .from("provider_applications")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .then(({ data, error }) => {
+        if (!active) return;
+        if (error) {
+          console.error("Unable to load provider applications:", error.message);
+          notify("Could not load provider applications. Check the migration and admin table permissions.");
+          setProviderApplications([]);
+        } else {
+          setProviderApplications((data || []) as ProviderApplicationRecord[]);
+        }
+        setProviderApplicationsLoading(false);
+      });
+    return () => { active = false; };
+  }, [path, userRoles]);
+
   const saveProfile = async () => {
     if (!supabase || !authUserId) return;
     const name = profileName.trim();
@@ -580,6 +633,43 @@ function App() {
 
   const notify = (s: string) => setToast(s);
   const go = (p: string) => navigate(p);
+  const reviewProviderApplication = async (
+    application: ProviderApplicationRecord,
+    status: ProviderApplicationRecord["status"],
+  ) => {
+    if (!supabase || !authUserId || !userRoles.includes("admin")) {
+      notify("Only an authenticated administrator can review applications.");
+      return;
+    }
+    const notes = (providerApplicationNotes[application.id] || "").trim();
+    if (status === "action_required" && !notes) {
+      notify("Add a note explaining what information is required.");
+      return;
+    }
+    const { error } = await supabase.rpc("admin_review_provider_application", {
+      p_application_id: application.id,
+      p_status: status,
+      p_reviewer_notes: notes || null,
+    });
+    if (error) {
+      console.error("Unable to review provider application:", error.message);
+      notify("The review decision could not be saved. Apply the provider-applications migration and verify administrator permissions.");
+      return;
+    }
+    const { data, error: refreshError } = await supabase
+      .from("provider_applications")
+      .select("*")
+      .eq("id", application.id)
+      .single();
+    if (refreshError || !data) {
+      notify("The review decision was saved, but the refreshed application could not be loaded.");
+      return;
+    }
+    setProviderApplications((current) => current.map((item) => item.id === application.id ? data as ProviderApplicationRecord : item));
+    notify(status === "approved"
+      ? "Application approved. Provider workspace access was assigned; the draft listing remains unpublished pending verification."
+      : "Application review status updated.");
+  };
   const openAuth = (mode: "signin" | "signup") => {
     setAuthMode(mode);
     setModal("signin");
@@ -630,8 +720,15 @@ function App() {
     setModal(null);
     setAuthPassword("");
     const isDetail = /^\/(caregivers|care-homes)\/[^/]+\/?$/.test(path);
+    const requestedApplication = data.user.user_metadata?.account_type;
     if (isDetail) {
       go(path);
+    } else if (path.startsWith("/apply/") && roles.includes("family")) {
+      go(path);
+    } else if (path === "/" && roles.includes("family") && requestedApplication === "caregiver") {
+      go("/apply/caregiver");
+    } else if (path === "/" && roles.includes("family") && requestedApplication === "care_home") {
+      go("/apply/care-home");
     } else if (path.startsWith("/admin") && roles.includes("admin"))
       go("/admin");
     else if (path.startsWith("/caregiver") && roles.includes("caregiver"))
@@ -677,7 +774,7 @@ function App() {
       email: authEmail.trim(),
       password: authPassword,
       options: {
-        data: { full_name: authFullName.trim(), account_type: "family" },
+        data: { full_name: authFullName.trim(), account_type: signupAccountType },
         emailRedirectTo: window.location.origin + "/",
       },
     });
@@ -690,12 +787,21 @@ function App() {
     setAuthConfirmPassword("");
     if (data.session && data.user) {
       setModal(null);
-      notify(
-        "Your account was created. You can start as a family user; caregiver and care-home applications are reviewed separately.",
-      );
+      if (signupAccountType === "caregiver") {
+        go("/apply/caregiver");
+        notify("Your account is ready. Complete the caregiver application for review.");
+      } else if (signupAccountType === "care_home") {
+        go("/apply/care-home");
+        notify("Your account is ready. Complete the care-home listing application for review.");
+      } else {
+        go("/app");
+        notify("Your family account is ready. You can browse care options now.");
+      }
     } else {
       notify(
-        "Account created. If email confirmation is enabled, check your inbox and spam folder. If no email arrives, use Resend confirmation email after checking the project's SMTP settings. Caregiver and care-home verification is only needed if you apply for those roles.",
+        signupAccountType === "family"
+          ? "Account created. If email confirmation is enabled, confirm your email and sign in to continue."
+          : "Account created. Confirm your email if requested, then sign in to continue your provider application. Provider access is only granted after review."
       );
       setAuthMode("signin");
     }
@@ -807,8 +913,9 @@ function App() {
           : path === "/app" || path.startsWith("/app/")
             ? "family"
             : null;
+  const isProviderApplication = path === "/apply/caregiver" || path === "/apply/care-home";
   const routeNeedsAuth =
-    !!requiredRole || isCaregiverDetail || isCareHomeDetail;
+    !!requiredRole || isCaregiverDetail || isCareHomeDetail || isProviderApplication;
   const hasRequiredRole = !requiredRole || userRoles.includes(requiredRole);
   const routeAuthorized =
     !routeNeedsAuth || (signedIn && !authLoading && hasRequiredRole);
@@ -1273,6 +1380,12 @@ function App() {
           {path === "/help" && (
             <InfoPage type="help" onAction={() => setModal("incident")} />
           )}
+          {path === "/apply/caregiver" && (
+            <ProviderApplication type="caregiver" onNotify={notify} />
+          )}
+          {path === "/apply/care-home" && (
+            <ProviderApplication type="care_home" onNotify={notify} />
+          )}
         </>
       )}
       {!isWorkspace && (!routeNeedsAuth || routeAuthorized) && (
@@ -1295,6 +1408,11 @@ function App() {
               <Link to="/caregivers">Find caregivers</Link>
               <Link to="/care-homes">Care homes</Link>
               <Link to="/how-it-works">How it works</Link>
+            </div>
+            <div>
+              <b>Offer care</b>
+              <Link to="/apply/caregiver">Become a caregiver</Link>
+              <Link to="/apply/care-home">List a care home</Link>
             </div>
             <div>
               <b>Trust & support</b>
@@ -1414,6 +1532,30 @@ function App() {
                       ? "Create a regular account to explore care options. No caregiver or care-home verification is required unless you separately apply for one of those roles."
                       : "Sign in with your account. Workspace access is determined by roles assigned in the database; you cannot select or grant yourself a role."}
                   </p>
+                  {authMode === "signup" && (
+                    <div className="signup-account-types" role="group" aria-label="How would you like to use AashrayaCare?">
+                      <span className="form-label-title">I want to…</span>
+                      {([
+                        ["family", "Find care", "I’m looking for care for myself or someone I support."],
+                        ["caregiver", "Offer care", "I’m an individual caregiver applying to list my services."],
+                        ["care_home", "List a care home", "I represent a care home or care facility."],
+                      ] as const).map(([value, title, description]) => (
+                        <button
+                          key={value}
+                          type="button"
+                          className={signupAccountType === value ? "signup-type-card selected" : "signup-type-card"}
+                          aria-pressed={signupAccountType === value}
+                          onClick={() => setSignupAccountType(value)}
+                        >
+                          <strong>{title}</strong>
+                          <span>{description}</span>
+                        </button>
+                      ))}
+                      {signupAccountType !== "family" && (
+                        <p className="inline-note"><ShieldCheck size={16} /> You’ll create a normal account first, then submit an application. This selection does not grant provider access or publish a listing.</p>
+                      )}
+                    </div>
+                  )}
                   {authMode === "signup" && (
                     <label>
                       Full name
@@ -2236,55 +2378,81 @@ function App() {
       );
     }
     if (path === "/admin/verifications") {
+      const pendingApplications = providerApplications.filter((application) => ["submitted", "under_review", "action_required"].includes(application.status));
       return (
         <>
           <PageHeader
             eyebrow="OPERATIONS"
-            title="Verification queue"
-            subtitle="Review evidence privately and record decisions with a reason."
+            title="Provider application review"
+            subtitle="Review caregiver and care-home submissions. Decisions are recorded in the database."
           />
           <div className="notice-bar">
-            <LockKeyhole size={18} /> Demo queue only. Production evidence must
-            be served from private storage using short-lived authorized URLs.
+            <LockKeyhole size={18} /> Applicant details are restricted to administrators. Approving an application through the admin-only database function assigns the appropriate provider workspace role and creates an unpublished draft profile. A separate verification and publication decision is still required before families can see the listing.
           </div>
-          {[
-            "Maya Shrestha · Caregiver profile",
-            "Sukha Senior Living · Facility listing",
-            "Laxmi Gurung · Caregiver profile",
-          ].map((x, i) => (
-            <div className="request-row" key={x}>
-              <div className="request-icon">
-                <FileCheck2 />
-              </div>
-              <div className="request-info">
-                <h3>{x}</h3>
-                <p>
-                  Submitted {i + 1} days ago · Evidence not shown in prototype
-                </p>
-              </div>
-              <StatusPill status="Under review" />
-              <div className="button-row">
-                <button
-                  className="button button-secondary small"
-                  onClick={() =>
-                    notify(
-                      "Request-changes action must be recorded by the secure admin API.",
-                    )
-                  }
-                >
-                  Request changes
-                </button>
-                <button
-                  className="button button-primary small"
-                  onClick={() =>
-                    notify("Demo only: no verification decision was recorded.")
-                  }
-                >
-                  Review
-                </button>
-              </div>
+          {providerApplicationsLoading ? (
+            <div className="panel"><p>Loading provider applications…</p></div>
+          ) : providerApplications.length === 0 ? (
+            <EmptyState
+              icon={<FileCheck2 />}
+              title="No provider applications yet"
+              text="New caregiver and care-home applications will appear here after the provider-applications database migration has been applied."
+              action="Refresh queue"
+              onClick={() => {
+                setProviderApplicationsLoading(true);
+                void supabase?.from("provider_applications").select("*").order("created_at", { ascending: false }).then(({ data, error }) => {
+                  setProviderApplicationsLoading(false);
+                  if (error) notify("Could not refresh the review queue.");
+                  else setProviderApplications((data || []) as ProviderApplicationRecord[]);
+                });
+              }}
+            />
+          ) : (
+            <div className="provider-review-list">
+              {providerApplications.map((application) => (
+                <article className="panel provider-review-card" key={application.id}>
+                  <div className="provider-review-heading">
+                    <div>
+                      <span className="eyebrow">{application.application_type === "caregiver" ? "INDIVIDUAL CAREGIVER" : "CARE-HOME REPRESENTATIVE"}</span>
+                      <h2>{application.application_type === "caregiver" ? application.applicant_name : application.facility_name}</h2>
+                      <p className="muted">{application.contact_email} · {application.contact_phone}</p>
+                    </div>
+                    <StatusPill status={application.status.replaceAll("_", " ")} />
+                  </div>
+                  <div className="provider-review-details">
+                    {application.application_type === "caregiver" ? (
+                      <>
+                        <p><b>Service area:</b> {application.service_area || "Not provided"}</p>
+                        <p><b>Experience:</b> {application.years_experience ?? 0} years</p>
+                        <p><b>Services:</b> {application.services?.join(", ") || "Not provided"}</p>
+                        <p><b>Expected rate:</b> {application.rate_amount == null ? "Not provided" : formatNPR(Number(application.rate_amount)) + " / " + (application.rate_unit || "hour")}</p>
+                      </>
+                    ) : (
+                      <>
+                        <p><b>Facility type:</b> {application.facility_type || "Not provided"}</p>
+                        <p><b>Address:</b> {application.facility_address || "Not provided"}</p>
+                        <p><b>Services:</b> {application.facility_services?.join(", ") || "Not provided"}</p>
+                        <p><b>Capacity:</b> {application.facility_capacity ?? "Not provided"} · <b>Monthly fee:</b> {application.monthly_fee == null ? "Not provided" : formatNPR(Number(application.monthly_fee))}</p>
+                        <p><b>Registration / licence:</b> {application.registration_number || "Not provided"}</p>
+                        {application.facility_description && <p><b>Description:</b> {application.facility_description}</p>}
+                      </>
+                    )}
+                    {application.additional_notes && <p><b>Applicant notes:</b> {application.additional_notes}</p>}
+                    <p className="muted tiny">Submitted {new Date(application.created_at).toLocaleString()} · ID {application.id}</p>
+                  </div>
+                  <label className="provider-review-notes">Review notes (required when requesting more information)
+                    <textarea rows={2} value={providerApplicationNotes[application.id] ?? application.reviewer_notes ?? ""} onChange={(event) => setProviderApplicationNotes((current) => ({ ...current, [application.id]: event.target.value }))} placeholder="Record the reason or next steps for the applicant." />
+                  </label>
+                  <div className="button-row provider-review-actions">
+                    <button className="button button-secondary small" disabled={!["submitted", "under_review", "action_required"].includes(application.status)} onClick={() => void reviewProviderApplication(application, "action_required")}>Request information</button>
+                    <button className="button button-secondary small" disabled={!["submitted", "under_review", "action_required"].includes(application.status)} onClick={() => void reviewProviderApplication(application, "rejected")}>Reject</button>
+                    <button className="button button-primary small" disabled={!["submitted", "under_review", "action_required"].includes(application.status)} onClick={() => void reviewProviderApplication(application, "approved")}>Approve application</button>
+                  </div>
+                  {application.status === "approved" && <p className="inline-note"><ShieldCheck size={16} /> Provider workspace access has been assigned. The listing remains unpublished until verification is complete.</p>}
+                </article>
+              ))}
             </div>
-          ))}
+          )}
+          {providerApplications.length > pendingApplications.length && <p className="muted tiny">{pendingApplications.length} application(s) still need a decision.</p>}
         </>
       );
     }
