@@ -2532,11 +2532,14 @@ function App() {
         </>
       );
     }
+    const greetingName = displayName.split(/\s+/).filter(Boolean)[0] || "there";
+    const hour = new Date().getHours();
+    const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
     return (
       <>
         <PageHeader
           eyebrow="YOUR CARE SPACE"
-          title="Good evening, Raunak"
+          title={`${greeting}, ${greetingName}`}
           subtitle="Here is what needs your attention today."
           action={
             <button
