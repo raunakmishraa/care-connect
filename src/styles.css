@@ -90,3 +90,37 @@ html[data-theme="dark"]{color-scheme:dark;--bg:#101715;--surface:#19211f;--muted
   .mobile-menu { flex-basis: 30px; width: 30px; min-width: 30px; height: 30px; }
   .mobile-nav { left: 0; right: 0; width: 100%; padding-left: 8px; padding-right: 8px; }
 }
+
+
+/* Provider onboarding and account-type selection */
+.signup-account-types{display:grid;gap:9px;margin:3px 0 8px}
+.form-label-title{font-size:13px;font-weight:700;color:var(--text)}
+.signup-type-card{display:grid;gap:4px;width:100%;padding:12px 14px;border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--text);text-align:left;white-space:normal}
+.signup-type-card:hover,.signup-type-card.selected{border-color:var(--primary)}
+.signup-type-card.selected{background:var(--soft);box-shadow:inset 0 0 0 1px var(--primary)}
+.signup-type-card strong{font-size:13px}
+.signup-type-card span{font-size:11px;line-height:1.5;color:var(--secondary)}
+.provider-application-page{padding-bottom:60px}
+.provider-application-form{max-width:900px;margin:24px auto 18px;display:grid;gap:18px}
+.provider-application-form h2{display:flex;align-items:center;gap:9px;font-size:19px;margin:8px 0 0}
+.provider-application-form h2 svg{color:var(--primary);flex-shrink:0}
+.application-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.application-fields>label,.application-notes{display:grid;gap:7px;font-size:12px;font-weight:650;min-width:0}
+.application-fields input,.application-fields select,.application-fields textarea,.application-notes textarea{width:100%;min-width:0;padding:11px 12px;border:1px solid var(--border);border-radius:9px;background:var(--surface);color:var(--text);font:inherit;font-weight:400}
+.application-fields input:focus,.application-fields select:focus,.application-fields textarea:focus,.application-notes textarea:focus{outline:3px solid color-mix(in srgb,var(--primary) 25%,transparent);border-color:var(--primary)}
+.application-field-wide{grid-column:1/-1}
+.application-services{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px;border:1px solid var(--border);border-radius:10px;padding:14px}
+.application-services legend{padding:0 5px;font-size:12px;font-weight:700}
+.application-services label{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:500}
+.application-services input{accent-color:var(--primary)}
+.application-notes{margin-top:2px}
+.application-submit-row{display:flex;align-items:center;justify-content:space-between;gap:20px;border-top:1px solid var(--border);padding-top:18px}
+.application-submit-row p{max-width:520px;margin:0}
+.application-guidance{max-width:900px;margin:20px auto 16px;padding:14px 16px;border:1px solid var(--border);border-radius:10px;background:var(--surface);display:flex;align-items:flex-start;gap:11px}
+.application-guidance svg{color:var(--primary);flex-shrink:0;margin-top:2px}
+.application-guidance p{margin:0;font-size:12px;color:var(--secondary)}
+.application-status-card{max-width:760px;margin:25px auto;padding:26px}
+.application-status-card h2{margin:10px 0;font-size:24px;text-transform:capitalize}
+.application-status-icon{display:grid;place-items:center;width:46px;height:46px;border-radius:13px;background:var(--soft);color:var(--primary);margin-bottom:17px}
+.footer-top{grid-template-columns:1.3fr 1fr 1fr 1fr 1.1fr}
+@media(max-width:760px){.application-fields{grid-template-columns:minmax(0,1fr)}.application-field-wide{grid-column:auto}.application-services{grid-template-columns:minmax(0,1fr)}.application-submit-row{align-items:stretch;flex-direction:column}.application-submit-row .button{width:100%}.provider-application-form{padding:18px}.application-status-card{padding:20px}.footer-top{grid-template-columns:repeat(2,minmax(0,1fr))}.footer-top .footer-brand,.footer-top .footer-note{grid-column:1/-1}}
