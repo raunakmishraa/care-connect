@@ -94,7 +94,7 @@ The signup form now asks whether a person wants to **find care**, **offer care a
 - `/apply/caregiver`: collects contact information, service area, experience, services and optional rate.
 - `/apply/care-home`: collects representative contact information, facility details, address, services, capacity, indicative fees and registration/licence reference.
 - `/admin/verifications`: lists provider applications and lets an authorized admin record submitted, information-required, rejected or approved decisions with review notes.
-- Applications are private to their applicant and authorized administrators through RLS. Application status does **not** grant a caregiver/facility role or publish a public listing. A trusted, separately reviewed role-assignment and listing-publication workflow is still required before production listings can go live. Document uploads and evidence verification are not implemented by these forms.
+- Applications are private to their applicant and authorized administrators through RLS. Only the admin-only database review function can grant the matching caregiver/facility workspace role after approval, and it creates an unpublished draft provider profile. A separate verification and listing-publication decision is still required before families can see the listing. Document uploads and evidence verification are not implemented by these forms.
 
 Apply the new migration to the same Supabase project configured for the app before testing submissions:
 
