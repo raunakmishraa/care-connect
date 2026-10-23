@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { ArrowRight, CheckCircle2, Clock3, FileCheck2, HeartHandshake, House, ShieldCheck } from "lucide-react";
 import { supabase } from "./lib";
 
@@ -102,7 +102,7 @@ export default function ProviderApplication({
     );
   };
 
-  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!supabase || !userId) {
       onNotify("Please sign in again before submitting your application.");
