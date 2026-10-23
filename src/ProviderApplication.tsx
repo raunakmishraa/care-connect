@@ -17,7 +17,7 @@ const statusCopy: Record<string, string> = {
   submitted: "Your application has been received and is waiting for review.",
   under_review: "The AashrayaCare team is reviewing your application.",
   action_required: "The team needs more information. Please contact support and quote your application ID.",
-  approved: "Your application has been approved. Provider workspace access and listing publication must still be confirmed by the AashrayaCare team.",
+  approved: "Your application has been approved and provider workspace access has been assigned. Your listing remains unpublished until the separate verification and publication checks are complete.",
   rejected: "This application was not approved. You may submit a revised application.",
 };
 
@@ -197,7 +197,7 @@ export default function ProviderApplication({
           <p>{statusCopy[existing.status] || "Contact support if you need help with this application."}</p>
           <p className="muted tiny">Application ID: {existing.id}</p>
           {existing.reviewer_notes && <div className="inline-note">{existing.reviewer_notes}</div>}
-          {existing.status === "approved" && <div className="inline-note"><ShieldCheck size={17} /> Approval is not a substitute for the platform's role assignment and listing publication checks.</div>}
+          {existing.status === "approved" && <div className="inline-note"><ShieldCheck size={17} /> Your provider workspace is enabled. Public listing publication remains disabled until verification is complete.</div>}
         </section>
       </main>
     );
