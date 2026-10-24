@@ -114,115 +114,20 @@ type Caregiver = {
   reviews: number;
   rating: number;
 };
-const caregivers: Caregiver[] = [
-  {
-    id: 1,
-    name: "Maya Shrestha",
-    initials: "MS",
-    role: "Companion & daily living support",
-    area: "Lalitpur · Jawalakhel",
-    years: 6,
-    rate: 650,
-    unit: "hour",
-    languages: ["नेपाली", "English"],
-    services: ["Companionship", "Daily living", "Mobility support"],
-    verified: "Identity reviewed",
-    availability: "Available this week",
-    bio: "Patient, thoughtful support with daily routines, light meals and friendly companionship. I work with families to keep routines familiar and comfortable.",
-    color: "rose",
-    reviews: 18,
-    rating: 4.9,
-  },
-  {
-    id: 2,
-    name: "Sita Karki",
-    initials: "SK",
-    role: "Experienced home caregiver",
-    area: "Kathmandu · Baneshwor",
-    years: 8,
-    rate: 700,
-    unit: "hour",
-    languages: ["नेपाली", "हिन्दी"],
-    services: ["Daily living", "Mobility support", "Overnight care"],
-    verified: "Identity & references reviewed",
-    availability: "Available tomorrow",
-    bio: "Eight years supporting older adults with everyday activities, mobility and household routines. Clear communication with family is important to me.",
-    color: "sage",
-    reviews: 24,
-    rating: 4.8,
-  },
-  {
-    id: 3,
-    name: "Anil Thapa",
-    initials: "AT",
-    role: "Companionship & practical support",
-    area: "Kathmandu · Lazimpat",
-    years: 4,
-    rate: 550,
-    unit: "hour",
-    languages: ["नेपाली", "English", "हिन्दी"],
-    services: ["Companionship", "Light household support"],
-    verified: "Identity reviewed",
-    availability: "Limited availability",
-    bio: "Reliable companionship and practical help around the home, errands and daily routines. I value patience, respect and consistency.",
-    color: "blue",
-    reviews: 12,
-    rating: 4.7,
-  },
-  {
-    id: 4,
-    name: "Laxmi Gurung",
-    initials: "LG",
-    role: "Daily living & overnight support",
-    area: "Bhaktapur · Suryabinayak",
-    years: 10,
-    rate: 750,
-    unit: "hour",
-    languages: ["नेपाली", "English"],
-    services: ["Daily living", "Overnight care", "Mobility support"],
-    verified: "Identity & qualifications reviewed",
-    availability: "Available this week",
-    bio: "Experienced in supporting personal routines and overnight needs with dignity. Happy to discuss the tasks that are appropriate for my experience.",
-    color: "gold",
-    reviews: 31,
-    rating: 5.0,
-  },
-];
-const facilities = [
-  {
-    name: "Himalayan Care Residence",
-    area: "Lalitpur · Bhaisepati",
-    type: "Residential care",
-    price: "From NPR 38,000 / month",
-    services: ["24-hour assistance", "Shared rooms", "Garden"],
-    updated: "Updated 2 days ago",
-    initials: "HC",
-    color: "sage",
-    desc: "A welcoming residential setting with shared spaces, daily support and family visits by arrangement.",
-  },
-  {
-    name: "Sukha Senior Living",
-    area: "Kathmandu · Budhanilkantha",
-    type: "Assisted living",
-    price: "Fees on enquiry",
-    services: ["Daily activities", "Accessible spaces", "Meals"],
-    updated: "Updated 5 days ago",
-    initials: "SS",
-    color: "blue",
-    desc: "A community-oriented setting focused on routines, connection and support with everyday activities.",
-  },
-  {
-    name: "Aama Care Home",
-    area: "Bhaktapur · Suryabinayak",
-    type: "Residential care",
-    price: "From NPR 32,000 / month",
-    services: ["Personal care", "Family visits", "Meal service"],
-    updated: "Updated 1 week ago",
-    initials: "AC",
-    color: "rose",
-    desc: "A small residential home with practical daily assistance and family communication.",
-  },
-];
+const caregivers: Caregiver[] = [];
+type FacilityListing = {
+  name: string;
+  area: string;
+  type: string;
+  price: string;
+  services: string[];
+  updated: string;
+  initials: string;
+  color: string;
+  desc: string;
+};
+const facilities: FacilityListing[] = [];
+
 const en = {
   home: "Home",
   caregivers: "Find caregivers",
@@ -252,7 +157,7 @@ const en = {
     "The caregiver responds. Your booking is confirmed only after terms are agreed.",
   featured: "Caregivers to get to know",
   featuredSub:
-    "Profiles shown here are examples for this prototype. Live listings must be approved before publication.",
+    "Only approved, published caregiver profiles appear here.",
   homesTitle: "Looking into residential care?",
   homesSub:
     "Explore facilities, understand their services and ask questions before arranging a visit.",
@@ -293,7 +198,7 @@ const ne: Record<keyof typeof en, string> = {
     "हेरचाहकर्ताले जवाफ दिन्छन्। सर्तहरू सहमत भएपछि मात्र बुकिङ पुष्टि हुन्छ।",
   featured: "चिन्न सकिने हेरचाहकर्ताहरू",
   featuredSub:
-    "यस नमुनामा देखिएका प्रोफाइलहरू उदाहरण हुन्। वास्तविक सूची प्रकाशित गर्नुअघि स्वीकृत हुनुपर्छ।",
+    "यहाँ स्वीकृत र प्रकाशित हेरचाहकर्ताका प्रोफाइल मात्र देखिन्छन्।",
   homesTitle: "आवासीय हेरचाह खोज्दै हुनुहुन्छ?",
   homesSub:
     "संस्थाहरू हेर्नुहोस्, सेवा बुझ्नुहोस् र भ्रमण मिलाउनुअघि प्रश्न सोध्नुहोस्।",
@@ -333,7 +238,7 @@ function App() {
     "signin" | "signup" | "forgot" | "reset"
   >("signin");
   const [authBusy, setAuthBusy] = useState(false);
-  const [saved, setSaved] = useState<number[]>([2]);
+  const [saved, setSaved] = useState<number[]>([]);
   const [toast, setToast] = useState("");
   const [searchText, setSearchText] = useState("");
   const [serviceFilter, setServiceFilter] = useState("All services");
@@ -347,36 +252,21 @@ function App() {
   >(null);
   const [step, setStep] = useState(1);
   const [request, setRequest] = useState({
-    recipient: "Mum",
-    service: "Daily living support",
+    recipient: "",
+    service: "",
     date: "",
     start: "09:00",
     end: "12:00",
-    area: "Lalitpur, Jawalakhel",
-    tasks: "Help with morning routine and preparing a light meal",
-    budget: "700",
+    area: "",
+    tasks: "",
+    budget: "",
     notes: "",
   });
-  const [requests, setRequests] = useState([
-    {
-      ref: "CC-2607-1042",
-      name: "Maya Shrestha",
-      service: "Daily living support",
-      date: "Fri, 16 Oct · 9:00–12:00",
-      status: "Pending response",
-      amount: 1950,
-    },
-  ]);
-  const [recipients, setRecipients] = useState(["Mum · Mother"]);
+  const [requests, setRequests] = useState<Array<{ref:string;name:string;service:string;date:string;status:string;amount:number}>>([]);
+  const [recipients, setRecipients] = useState<string[]>([]);
   const [newRecipient, setNewRecipient] = useState("");
   const [message, setMessage] = useState("");
-  const [messages, setMessages] = useState([
-    {
-      from: "Maya Shrestha",
-      text: "Namaste! Thank you for your request. Could you share a little more about the morning routine?",
-      time: "10:42 AM",
-    },
-  ]);
+  const [messages, setMessages] = useState<Array<{from:string;text:string;time:string}>>([]);
   const [facilityEnquiries, setFacilityEnquiries] = useState<string[]>([]);
   const [incidentType, setIncidentType] = useState("Safety concern");
   const [incidentText, setIncidentText] = useState("");
@@ -3272,7 +3162,7 @@ function CaregiverDirectory({
         </div>
         <div className="results-summary">
           <b>{list.length} caregivers</b>
-          <small>Sample profiles · prototype</small>
+          <small>Approved public listings</small>
         </div>
       </div>
       <div className="search-panel">
