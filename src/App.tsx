@@ -380,7 +380,8 @@ function App() {
       console.error("Unable to load public caregiver listings:", error);
       if (active) {
         setCaregivers([]);
-        setCaregiversError("We couldn't load caregiver listings right now. Please try again shortly.");
+        const detail = error instanceof Error ? error.message : String(error?.message || error || "Unknown Supabase error");
+        setCaregiversError("We couldn't load caregiver listings right now. " + detail);
       }
     }).finally(() => {
       if (active) setCaregiversLoading(false);
@@ -595,7 +596,7 @@ function App() {
         if (!active) return;
         if (error) {
           console.error("Unable to load caregiver verification queue:", error.message);
-          notify("Could not load caregiver profiles for verification. Apply the caregiver publication migration.");
+          notify("Could not load caregiver profiles for verification: " + error.message);
           setCaregiverReviewProfiles([]);
         } else {
           setCaregiverReviewProfiles((data || []) as CaregiverReviewProfile[]);
