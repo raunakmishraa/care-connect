@@ -109,10 +109,11 @@ html[data-theme="dark"]{color-scheme:dark;--bg:#101715;--surface:#19211f;--muted
 .application-fields input,.application-fields select,.application-fields textarea,.application-notes textarea{width:100%;min-width:0;padding:11px 12px;border:1px solid var(--border);border-radius:9px;background:var(--surface);color:var(--text);font:inherit;font-weight:400}
 .application-fields input:focus,.application-fields select:focus,.application-fields textarea:focus,.application-notes textarea:focus{outline:3px solid color-mix(in srgb,var(--primary) 25%,transparent);border-color:var(--primary)}
 .application-field-wide{grid-column:1/-1}
-.application-services{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px;border:1px solid var(--border);border-radius:10px;padding:14px}
-.application-services legend{padding:0 5px;font-size:12px;font-weight:700}
-.application-services label{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:500}
-.application-services input{accent-color:var(--primary)}
+.application-services{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:stretch;gap:12px 24px;min-width:0;margin:0;border:1px solid var(--border);border-radius:12px;padding:16px}
+.application-services legend{padding:0 6px;font-size:12px;font-weight:700}
+.application-services label{display:grid;grid-template-columns:20px minmax(0,1fr);align-items:center;column-gap:10px;min-width:0;min-height:40px;margin:0;font-size:13px;font-weight:500;line-height:1.45;overflow-wrap:anywhere;cursor:pointer}
+.application-services input{width:18px;height:18px;margin:0;justify-self:center;accent-color:var(--primary);cursor:pointer}
+@media(max-width:760px){.application-services{grid-template-columns:minmax(0,1fr);gap:8px;padding:14px}.application-services label{min-height:42px;grid-template-columns:22px minmax(0,1fr);column-gap:10px}}
 .application-notes{margin-top:2px}
 .application-submit-row{display:flex;align-items:center;justify-content:space-between;gap:20px;border-top:1px solid var(--border);padding-top:18px}
 .application-submit-row p{max-width:520px;margin:0}
