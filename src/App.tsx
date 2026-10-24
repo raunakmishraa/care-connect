@@ -869,7 +869,7 @@ function App() {
     setRequests((r) => [
       {
         ref,
-        name: (selected as Caregiver | null)?.name || "Maya Shrestha",
+        name: (selected as Caregiver | null)?.name || "",
         service: request.service,
         date: `${request.date} · ${request.start}–${request.end}`,
         status: "Pending response",
@@ -1623,7 +1623,7 @@ function App() {
                   setModal(null);
                   setQuery("");
                   notify(
-                    "Enquiry saved in this demo. No facility has been contacted.",
+                    "This enquiry could not be sent because live enquiry submission is not configured.",
                   );
                 }}
               >
@@ -1666,7 +1666,7 @@ function App() {
                   setModal(null);
                   setIncidentText("");
                   notify(
-                    "Demo only: no report was sent. Connect the backend and escalation workflow before launch.",
+                    "Incident reporting is not available right now because the secure reporting service is not configured.",
                   );
                 }}
               >
@@ -1938,7 +1938,7 @@ function App() {
               <button className="conversation active">
                 <div className="mini-avatar rose">MS</div>
                 <span>
-                  <b>Maya Shrestha</b>
+                  <b>{authFullName || profileName || authEmail || "No conversation selected"}</b>
                   <small>Care request · Daily living</small>
                   <small className="muted">Today, 10:42 AM</small>
                 </span>
@@ -1947,7 +1947,7 @@ function App() {
               <button className="conversation">
                 <div className="mini-avatar blue">HC</div>
                 <span>
-                  <b>Himalayan Care Residence</b>
+                  <b>No facility selected</b>
                   <small>Facility enquiry</small>
                   <small className="muted">Yesterday</small>
                 </span>
@@ -1959,7 +1959,7 @@ function App() {
                 <div>
                   <b>Maya Shrestha</b>
                   <small>
-                    <span className="online-dot" /> Request CC-2607-1042
+                    <span className="online-dot" /> No linked request
                   </small>
                 </div>
                 <button
@@ -2119,7 +2119,7 @@ function App() {
                     className="button button-primary small"
                     onClick={() =>
                       notify(
-                        "Demo only: connect the atomic respond-to-request function before accepting. No booking was created.",
+                        "This request cannot be accepted until the secure booking service is configured.",
                       )
                     }
                   >
@@ -2202,7 +2202,7 @@ function App() {
               className="button button-primary"
               onClick={() =>
                 notify(
-                  "Saved in demo state only. Connect profile update API to persist changes.",
+                  "Profile updates are unavailable until the profile service is configured.",
                 )
               }
             >
@@ -2365,8 +2365,8 @@ function App() {
           </div>
           <EmptyState
             icon={<Shield />}
-            title="No incident records in demo"
-            text="Production reports must be restricted to authorized staff. Do not use this prototype for real safety reports."
+            title="No incident records"
+            text="No incident reports are available for your account."
             action="Review safety guidance"
             onClick={() => go("/safety")}
           />
@@ -2402,21 +2402,21 @@ function App() {
           <div className="stats-grid">
             <Stat
               label="Caregiver reviews"
-              value="08"
+              value={String(caregivers.length).padStart(2, "0")}
               icon={<UserRound />}
               tone="sage"
               note="3 need more info"
             />
             <Stat
               label="Facility reviews"
-              value="03"
+              value={String(facilities.length).padStart(2, "0")}
               icon={<House />}
               tone="blue"
               note="1 updated today"
             />
             <Stat
               label="Open support cases"
-              value="05"
+              value={String(requests.length).padStart(2, "0")}
               icon={<HelpCircle />}
               tone="gold"
               note="2 unassigned"
@@ -2487,7 +2487,7 @@ function App() {
           <div className="stats-grid">
             <Stat
               label="New requests"
-              value="01"
+              value={String(providerApplications.length).padStart(2, "0")}
               icon={<ClipboardList />}
               tone="sage"
               note="Needs your response"
@@ -3776,7 +3776,7 @@ function InfoPage({ type, onAction }: any) {
         : {
             eyebrow: "WE ARE HERE TO HELP",
             title: "A little help with the next step.",
-            sub: "Find care, understand a request or raise a concern. This prototype does not send messages to a live support team.",
+            sub: "Find care, understand a request or raise a concern. Contact support if you need assistance.",
             items: [
               [
                 "Find care",
