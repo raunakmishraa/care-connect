@@ -546,8 +546,22 @@ function App() {
       p_reviewer_notes: notes || null,
     });
     if (error) {
-      console.error("Unable to review provider application:", error.message);
-      notify("The review decision could not be saved. Apply the provider-applications migration and verify administrator permissions.");
+      console.error("Unable to review provider application:", {
+        message: error.message,
+        code: error.code,
+        details: error.details,
+        hint: error.hint,
+      });
+      const errorText = [error.message, error.details, error.hint]
+        .filter(Boolean)
+        .join(" ");
+      if (/admin_review_provider_application.*(not found|does not exist)|could not find the function|schema cache/i.test(errorText)) {
+        notify("Provider review database function is missing. Apply supabase/migrations/202610230001_provider_applications.sql in the Supabase SQL Editor, then retry.");
+      } else if (/administrator access required|permission denied|row-level security|42501/i.test(errorText) || error.code === "42501") {
+        notify("Supabase rejected this review for permissions. Confirm this signed-in user's public.user_roles row has role = 'admin', then sign out and back in.");
+      } else {
+        notify(`Review failed: ${error.message || "Unknown Supabase error"}${error.code ? ` (code ${error.code})` : ""}`);
+      }
       return;
     }
     const { data, error: refreshError } = await supabase
