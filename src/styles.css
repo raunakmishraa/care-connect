@@ -198,3 +198,61 @@ html[data-theme="dark"] select optgroup {
   text-align: center;
   cursor: not-allowed;
 }
+
+
+/* Keep both directory actions balanced, including the unavailable state. */
+.caregiver-card-actions {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: stretch;
+}
+.caregiver-card-actions > .button,
+.caregiver-card-actions > .caregiver-unavailable-status {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 42px;
+  white-space: normal;
+}
+.caregiver-card-actions > .caregiver-unavailable-status {
+  cursor: not-allowed;
+  opacity: 1;
+}
+.caregiver-self-service .page-header {
+  margin-bottom: 18px;
+}
+.caregiver-status-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px 18px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  margin: 18px 0;
+}
+.caregiver-status-summary span {
+  color: var(--secondary);
+}
+.caregiver-status-summary strong {
+  text-transform: capitalize;
+}
+.caregiver-self-service-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 18px 0;
+}
+.caregiver-status-note {
+  margin-top: 14px;
+  line-height: 1.6;
+}
+@media (max-width: 520px) {
+  .caregiver-card-actions {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .caregiver-status-summary {
+    grid-template-columns: 1fr;
+  }
+  .caregiver-self-service-actions > .button {
+    width: 100%;
+  }
+}
