@@ -57,6 +57,7 @@ import {
 } from "lucide-react";
 import { formatNPR, supabase } from "./lib";
 import ProviderApplication from "./ProviderApplication";
+import SupportChatbot from "./SupportChatbot";
 
 const authErrorMessage = (message: string) => {
   if (
@@ -1441,6 +1442,7 @@ function App() {
           </div>
         </footer>
       )}
+      <SupportChatbot />
       {modal && (
         <Modal
           title={
