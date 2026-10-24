@@ -418,9 +418,11 @@ function App() {
         setAuthLoading(false);
         return;
       }
+      const sameAuthenticatedUser = authUserId === session.user.id && signedIn;
       setSignedIn(true);
       setAuthUserId(session.user.id);
-      setAuthLoading(true);
+      // Keep the current UI usable while refreshing role data for an existing session.
+      if (!sameAuthenticatedUser) setAuthLoading(true);
       if (!supabase) {
         setUserRoles([]);
         setRole(null);
@@ -464,6 +466,9 @@ function App() {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, session) => {
+      // Token refreshes do not change identity or roles; avoid re-running role checks
+      // and toggling protected pages into a visible loading state for these events.
+      if (event === "TOKEN_REFRESHED") return;
       if (event === "PASSWORD_RECOVERY") {
         setAuthMode("reset");
         setModal("signin");
@@ -496,7 +501,7 @@ function App() {
 
     let active = true;
     const refreshWorkspaceRoles = async () => {
-      setAuthLoading(true);
+      // Revalidate permissions in the background without blocking/remounting the page.
       const { data: sessionData, error: sessionError } =
         await supabase.auth.getSession();
       if (!active) return;
