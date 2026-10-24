@@ -70,6 +70,15 @@ const authErrorMessage = (message: string) => {
   return message;
 };
 
+type CaregiverReviewProfile = {
+  id: string;
+  user_id: string;
+  public_name: string;
+  verification_status: string;
+  is_published: boolean;
+  accepting_requests: boolean;
+};
+
 type ProviderApplicationRecord = {
   id: string;
   user_id: string;
@@ -277,6 +286,9 @@ function App() {
   const [providerApplications, setProviderApplications] = useState<ProviderApplicationRecord[]>([]);
   const [providerApplicationsLoading, setProviderApplicationsLoading] = useState(false);
   const [providerApplicationNotes, setProviderApplicationNotes] = useState<Record<string, string>>({});
+  const [caregiverReviewProfiles, setCaregiverReviewProfiles] = useState<CaregiverReviewProfile[]>([]);
+  const [caregiverReviewProfilesLoading, setCaregiverReviewProfilesLoading] = useState(false);
+  const [publishingCaregiverId, setPublishingCaregiverId] = useState<string | null>(null);
   const t = lang === "en" ? en : ne;
   const location = useLocation();
   const navigate = useNavigate();
@@ -567,6 +579,57 @@ function App() {
       });
     return () => { active = false; };
   }, [path, userRoles]);
+
+  useEffect(() => {
+    if (path !== "/admin/verifications" || !supabase || !userRoles.includes("admin")) return;
+    let active = true;
+    setCaregiverReviewProfilesLoading(true);
+    void supabase
+      .from("caregiver_profiles")
+      .select("id, user_id, public_name, verification_status, is_published, accepting_requests")
+      .eq("is_published", false)
+      .order("created_at", { ascending: false })
+      .then(({ data, error }) => {
+        if (!active) return;
+        if (error) {
+          console.error("Unable to load caregiver verification queue:", error.message);
+          notify("Could not load caregiver profiles for verification. Apply the caregiver publication migration.");
+          setCaregiverReviewProfiles([]);
+        } else {
+          setCaregiverReviewProfiles((data || []) as CaregiverReviewProfile[]);
+        }
+        setCaregiverReviewProfilesLoading(false);
+      });
+    return () => { active = false; };
+  }, [path, userRoles]);
+
+  const publishCaregiverProfile = async (profile: CaregiverReviewProfile) => {
+    if (!supabase || !userRoles.includes("admin")) {
+      notify("Only an administrator can publish caregiver profiles.");
+      return;
+    }
+    const applicationApproved = providerApplications.some(
+      (application) => application.user_id === profile.user_id &&
+        application.application_type === "caregiver" &&
+        application.status === "approved",
+    );
+    if (!applicationApproved) {
+      notify("Approve the caregiver application before completing verification.");
+      return;
+    }
+    setPublishingCaregiverId(profile.id);
+    const { error } = await supabase.rpc("admin_publish_caregiver_profile", {
+      p_profile_id: profile.id,
+    });
+    setPublishingCaregiverId(null);
+    if (error) {
+      console.error("Unable to publish caregiver profile:", error);
+      notify("Publication failed: " + error.message);
+      return;
+    }
+    setCaregiverReviewProfiles((current) => current.filter((item) => item.id !== profile.id));
+    notify("Caregiver verified and published. The public directory will show this profile.");
+  };
 
   const saveProfile = async () => {
     if (!supabase || !authUserId) return;
@@ -2440,6 +2503,41 @@ function App() {
             </div>
           )}
           {providerApplications.length > pendingApplications.length && <p className="muted tiny">{pendingApplications.length} application(s) still need a decision.</p>}
+          <div className="panel" style={{ marginTop: 24 }}>
+            <h2>Caregiver verification and publication</h2>
+            <p className="muted">Only publish after reviewing the required identity and qualification evidence. Publishing marks the profile approved and makes it visible in the public directory.</p>
+            {caregiverReviewProfilesLoading ? (
+              <p>Loading unpublished caregiver profiles…</p>
+            ) : caregiverReviewProfiles.length === 0 ? (
+              <p className="muted">No unpublished caregiver profiles need verification.</p>
+            ) : (
+              <div className="provider-review-list">
+                {caregiverReviewProfiles.map((profile) => {
+                  const applicationApproved = providerApplications.some((application) =>
+                    application.user_id === profile.user_id &&
+                    application.application_type === "caregiver" &&
+                    application.status === "approved"
+                  );
+                  return (
+                    <article className="provider-review-card" key={profile.id}>
+                      <div>
+                        <h3>{profile.public_name}</h3>
+                        <p className="muted">Verification status: {profile.verification_status.replaceAll("_", " ")} · Requests: {profile.accepting_requests ? "enabled" : "disabled"}</p>
+                        <p className="tiny muted">Profile ID: {profile.id}</p>
+                      </div>
+                      <button
+                        className="button button-primary small"
+                        disabled={!applicationApproved || publishingCaregiverId === profile.id}
+                        onClick={() => void publishCaregiverProfile(profile)}
+                      >
+                        {publishingCaregiverId === profile.id ? "Publishing…" : "Verify & publish"}
+                      </button>
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </>
       );
     }
