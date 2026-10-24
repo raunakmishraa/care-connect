@@ -97,7 +97,7 @@ type ProviderApplicationRecord = {
 };
 
 type Caregiver = {
-  id: number;
+  id: string;
   name: string;
   initials: string;
   role: string;
@@ -114,7 +114,7 @@ type Caregiver = {
   reviews: number;
   rating: number;
 };
-const caregivers: Caregiver[] = [];
+const EMPTY_CAREGIVERS: Caregiver[] = [];
 type FacilityListing = {
   name: string;
   area: string;
@@ -238,7 +238,10 @@ function App() {
     "signin" | "signup" | "forgot" | "reset"
   >("signin");
   const [authBusy, setAuthBusy] = useState(false);
-  const [saved, setSaved] = useState<number[]>([]);
+  const [saved, setSaved] = useState<string[]>([]);
+  const [caregivers, setCaregivers] = useState<Caregiver[]>(EMPTY_CAREGIVERS);
+  const [caregiversLoading, setCaregiversLoading] = useState(false);
+  const [caregiversError, setCaregiversError] = useState<string | null>(null);
   const [toast, setToast] = useState("");
   const [searchText, setSearchText] = useState("");
   const [serviceFilter, setServiceFilter] = useState("All services");
@@ -297,6 +300,79 @@ function App() {
     }
   }, [toast]);
   useEffect(() => setMobileOpen(false), [path]);
+
+  useEffect(() => {
+    if (!supabase) {
+      setCaregivers([]);
+      setCaregiversError("Caregiver listings are unavailable because Supabase is not configured.");
+      return;
+    }
+    const shouldLoadDirectory =
+      path === "/" ||
+      path === "/caregivers" ||
+      /^\/caregivers\/[^/]+\/?$/.test(path);
+    if (!shouldLoadDirectory) return;
+    let active = true;
+    setCaregiversLoading(true);
+    setCaregiversError(null);
+    void (async () => {
+      const { data: profiles, error } = await supabase
+        .from("caregiver_profiles")
+        .select("id, public_name, headline, years_experience, service_areas, rate_amount, rate_unit, accepting_requests, verification_status, is_published")
+        .eq("verification_status", "approved")
+        .eq("is_published", true)
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      const profileRows = profiles || [];
+      if (!profileRows.length) {
+        if (active) setCaregivers([]);
+        return;
+      }
+      const profileIds = profileRows.map((profile: any) => profile.id);
+      const { data: serviceRows, error: serviceError } = await supabase
+        .from("caregiver_services")
+        .select("caregiver_id, service_categories(name)")
+        .in("caregiver_id", profileIds);
+      if (serviceError) console.warn("Unable to load caregiver service labels:", serviceError.message);
+      const servicesByProfile = new Map<string, string[]>();
+      (serviceRows || []).forEach((row: any) => {
+        const relation = row.service_categories;
+        const categoryName = Array.isArray(relation) ? relation[0]?.name : relation?.name;
+        if (!categoryName) return;
+        const current = servicesByProfile.get(row.caregiver_id) || [];
+        current.push(String(categoryName));
+        servicesByProfile.set(row.caregiver_id, current);
+      });
+      const mapped: Caregiver[] = profileRows.map((profile: any, index: number) => {
+        const name = String(profile.public_name || "Caregiver");
+        const initials = name.split(/\s+/).filter(Boolean).slice(0, 2).map((part: string) => part[0].toUpperCase()).join("") || "C";
+        const areas = Array.isArray(profile.service_areas) ? profile.service_areas : [];
+        const headline = String(profile.headline || "Care and daily living support");
+        const rawServices = servicesByProfile.get(profile.id) || [];
+        return {
+          id: String(profile.id), name, initials, role: headline,
+          area: areas.join(", ") || "Service area not specified",
+          years: Number(profile.years_experience || 0),
+          rate: Number(profile.rate_amount || 0), unit: String(profile.rate_unit || "hour"),
+          languages: [], services: rawServices.length ? rawServices : ["Daily living support"],
+          verified: "Verified",
+          availability: profile.accepting_requests ? "Accepting requests" : "Currently unavailable",
+          bio: headline, color: ["sage", "blue", "gold", "rose"][index % 4],
+          reviews: 0, rating: 0,
+        };
+      });
+      if (active) setCaregivers(mapped);
+    })().catch((error: any) => {
+      console.error("Unable to load public caregiver listings:", error);
+      if (active) {
+        setCaregivers([]);
+        setCaregiversError("We couldn't load caregiver listings right now. Please try again shortly.");
+      }
+    }).finally(() => {
+      if (active) setCaregiversLoading(false);
+    });
+    return () => { active = false; };
+  }, [path]);
   useEffect(() => {
     let active = true;
     const applySession = async (session: any) => {
@@ -853,7 +929,7 @@ function App() {
               ? b.years - a.years
               : b.rating - a.rating,
         ),
-    [searchText, serviceFilter, sort],
+    [caregivers, searchText, serviceFilter, sort],
   );
   const requestCare = (c: Caregiver) => {
     if (!signedIn) {
@@ -1222,6 +1298,8 @@ function App() {
           {path === "/caregivers" && (
             <CaregiverDirectory
               list={filtered}
+              loading={caregiversLoading}
+              loadError={caregiversError}
               searchText={searchText}
               setSearchText={setSearchText}
               serviceFilter={serviceFilter}
@@ -3147,6 +3225,8 @@ function CaregiverCard({ c, saved, onSave, onProfile, onRequest }: any) {
 }
 function CaregiverDirectory({
   list,
+  loading = false,
+  loadError = null,
   searchText,
   setSearchText,
   serviceFilter,
@@ -3306,7 +3386,11 @@ function CaregiverDirectory({
           </select>
         </label>
       </div>
-      {list.length ? (
+      {loading ? (
+        <div className="empty-inline" role="status">Loading approved caregiver listings…</div>
+      ) : loadError ? (
+        <EmptyState icon={<AlertTriangle />} title="Caregiver listings unavailable" text={loadError} action="Retry" onClick={() => window.location.reload()} />
+      ) : list.length ? (
         <div className="caregiver-grid directory-grid">
           {list.map((c: Caregiver) => (
             <CaregiverCard
@@ -3322,8 +3406,8 @@ function CaregiverDirectory({
       ) : (
         <EmptyState
           icon={<Search />}
-          title="No caregivers match these filters"
-          text="Try another area or remove a service filter to see more options."
+          title="No published caregivers yet"
+          text="Approved caregiver profiles appear after verification and publication. Try again later or clear your filters."
           action="Clear filters"
           onClick={() => {
             setSearchText("");
