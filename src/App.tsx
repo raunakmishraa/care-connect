@@ -290,6 +290,9 @@ function App() {
   const [caregiverReviewProfiles, setCaregiverReviewProfiles] = useState<CaregiverReviewProfile[]>([]);
   const [caregiverReviewProfilesLoading, setCaregiverReviewProfilesLoading] = useState(false);
   const [publishingCaregiverId, setPublishingCaregiverId] = useState<string | null>(null);
+  const [ownCaregiverStatus, setOwnCaregiverStatus] = useState<{ id: string; verificationStatus: string; isPublished: boolean; acceptingRequests: boolean } | null>(null);
+  const [caregiverStatusLoading, setCaregiverStatusLoading] = useState(false);
+  const [caregiverStatusSaving, setCaregiverStatusSaving] = useState(false);
   const t = lang === "en" ? en : ne;
   const location = useLocation();
   const navigate = useNavigate();
@@ -313,6 +316,36 @@ function App() {
     }
   }, [toast]);
   useEffect(() => setMobileOpen(false), [path]);
+  useEffect(() => {
+    if (path !== "/caregiver/profile" || !supabase || !authUserId || !userRoles.includes("caregiver")) {
+      setOwnCaregiverStatus(null);
+      return;
+    }
+    let active = true;
+    setCaregiverStatusLoading(true);
+    void supabase
+      .from("caregiver_profiles")
+      .select("id, verification_status, is_published, accepting_requests")
+      .eq("user_id", authUserId)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (!active) return;
+        if (error) {
+          console.error("Unable to load own caregiver availability:", error);
+          notify("Couldn't load your listing status: " + error.message);
+          setOwnCaregiverStatus(null);
+          return;
+        }
+        setOwnCaregiverStatus(data ? {
+          id: String(data.id),
+          verificationStatus: String(data.verification_status || "pending"),
+          isPublished: Boolean(data.is_published),
+          acceptingRequests: Boolean(data.accepting_requests),
+        } : null);
+      })
+      .finally(() => { if (active) setCaregiverStatusLoading(false); });
+    return () => { active = false; };
+  }, [path, authUserId, userRoles.join(",")]);
 
   useEffect(() => {
     if (!supabase) {
@@ -657,6 +690,32 @@ function App() {
       if (authError) console.warn("Profile saved, but auth metadata was not updated:", authError.message);
     }
     notify("Profile information updated.");
+  };
+
+  const updateOwnCaregiverStatus = async (changes: { acceptingRequests?: boolean; isPublished?: boolean }) => {
+    if (!supabase || !authUserId || !userRoles.includes("caregiver") || !ownCaregiverStatus) {
+      notify("Only the signed-in caregiver can change their own listing status.");
+      return;
+    }
+    setCaregiverStatusSaving(true);
+    const { error } = await supabase.rpc("caregiver_update_own_listing_status", {
+      p_accepting_requests: changes.acceptingRequests ?? ownCaregiverStatus.acceptingRequests,
+      p_is_published: changes.isPublished ?? ownCaregiverStatus.isPublished,
+    });
+    setCaregiverStatusSaving(false);
+    if (error) {
+      console.error("Unable to update caregiver listing status:", {
+        message: error.message, code: error.code, details: error.details, hint: error.hint,
+      });
+      notify("Couldn't update your listing status: " + error.message);
+      return;
+    }
+    setOwnCaregiverStatus(current => current ? {
+      ...current,
+      acceptingRequests: changes.acceptingRequests ?? current.acceptingRequests,
+      isPublished: changes.isPublished ?? current.isPublished,
+    } : current);
+    notify("Your caregiver listing preferences have been updated.");
   };
 
   const displayName = profileName.trim() || authFullName.trim() || profileEmail.split("@")[0] || "";
@@ -1883,6 +1942,54 @@ function App() {
               </div>
             </form>
           </section>
+          {path === "/caregiver/profile" && userRoles.includes("caregiver") && (
+            <section className="panel caregiver-self-service" style={{ maxWidth: 760, padding: 28, marginTop: 20 }}>
+              <PageHeader
+                eyebrow="LISTING CONTROLS"
+                title="Your public availability"
+                subtitle="Manage requests and directory visibility yourself. These preferences do not change your approval status."
+              />
+              {caregiverStatusLoading ? (
+                <p className="muted">Loading your caregiver listing status…</p>
+              ) : !ownCaregiverStatus ? (
+                <p className="muted">No caregiver profile was found for this account. If you recently applied, check your application status.</p>
+              ) : (
+                <>
+                  <div className="caregiver-status-summary">
+                    <span>Verification status</span>
+                    <strong>{ownCaregiverStatus.verificationStatus.replace(/_/g, " ")}</strong>
+                    <span>Directory listing</span>
+                    <strong>{ownCaregiverStatus.isPublished ? "Visible to families" : "Hidden from families"}</strong>
+                    <span>Requests</span>
+                    <strong>{ownCaregiverStatus.acceptingRequests ? "Accepting requests" : "Not accepting requests"}</strong>
+                  </div>
+                  {ownCaregiverStatus.verificationStatus === "approved" ? (
+                    <div className="caregiver-self-service-actions">
+                      <button
+                        className="button button-secondary"
+                        type="button"
+                        disabled={caregiverStatusSaving || !ownCaregiverStatus.isPublished}
+                        onClick={() => void updateOwnCaregiverStatus({ acceptingRequests: !ownCaregiverStatus.acceptingRequests })}
+                      >
+                        {ownCaregiverStatus.acceptingRequests ? "Pause new requests" : "Start accepting requests"}
+                      </button>
+                      <button
+                        className="button button-primary"
+                        type="button"
+                        disabled={caregiverStatusSaving}
+                        onClick={() => void updateOwnCaregiverStatus({ isPublished: !ownCaregiverStatus.isPublished })}
+                      >
+                        {ownCaregiverStatus.isPublished ? "Hide from listing page" : "List my profile again"}
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="muted">Self-service availability controls become available after an administrator approves your profile. Changing these preferences later will not require another approval.</p>
+                  )}
+                  <p className="muted caregiver-status-note">Hiding your profile removes it from the public directory but does not revoke admin approval. You can list it again whenever you are ready.</p>
+                </>
+              )}
+            </section>
+          )}
         </>
       );
     }
