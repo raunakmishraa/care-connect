@@ -317,7 +317,7 @@ function App() {
   }, [toast]);
   useEffect(() => setMobileOpen(false), [path]);
   useEffect(() => {
-    if (path !== "/caregiver/profile" || !supabase || !authUserId || !userRoles.includes("caregiver")) {
+    if (!["/caregiver", "/caregiver/profile"].includes(path) || !supabase || !authUserId || !userRoles.includes("caregiver")) {
       setOwnCaregiverStatus(null);
       return;
     }
@@ -1980,7 +1980,7 @@ function App() {
                       <button
                         className="button button-secondary"
                         type="button"
-                        disabled={caregiverStatusSaving || !ownCaregiverStatus.isPublished}
+                        disabled={caregiverStatusSaving}
                         onClick={() => void updateOwnCaregiverStatus({ acceptingRequests: !ownCaregiverStatus.acceptingRequests })}
                       >
                         {ownCaregiverStatus.acceptingRequests ? "Pause new requests" : "Start accepting requests"}
