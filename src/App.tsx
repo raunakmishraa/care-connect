@@ -418,11 +418,9 @@ function App() {
         setAuthLoading(false);
         return;
       }
-      const sameAuthenticatedUser = authUserId === session.user.id && signedIn;
       setSignedIn(true);
       setAuthUserId(session.user.id);
-      // Keep the current UI usable while refreshing role data for an existing session.
-      if (!sameAuthenticatedUser) setAuthLoading(true);
+      // Do not re-block the page for auth events when the session is already available.
       if (!supabase) {
         setUserRoles([]);
         setRole(null);
