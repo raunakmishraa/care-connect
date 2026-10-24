@@ -118,6 +118,7 @@ type Caregiver = {
   services: string[];
   verified: string;
   availability: string;
+  acceptingRequests: boolean;
   bio: string;
   color: string;
   reviews: number;
@@ -369,6 +370,7 @@ function App() {
           languages: [], services: rawServices.length ? rawServices : ["Daily living support"],
           verified: "Verified",
           availability: profile.accepting_requests ? "Accepting requests" : "Currently unavailable",
+          acceptingRequests: Boolean(profile.accepting_requests),
           bio: headline, color: ["sage", "blue", "gold", "rose"][index % 4],
           reviews: 0, rating: 0,
         };
@@ -3266,10 +3268,10 @@ function CaregiverCard({ c, saved, onSave, onProfile, onRequest }: any) {
       </div>
       <div className="caregiver-name-row">
         <h3>{c.name}</h3>
-        <span className="rating">
+        {c.rating > 0 && <span className="rating">
           <Star size={14} fill="currentColor" />
           {c.rating.toFixed(1)}
-        </span>
+        </span>}
       </div>
       <p className="caregiver-role">{c.role}</p>
       <div className="caregiver-area">
@@ -3298,8 +3300,8 @@ function CaregiverCard({ c, saved, onSave, onProfile, onRequest }: any) {
       </div>
       <div className="caregiver-card-bottom">
         <div className="rate">
-          <b>{formatNPR(c.rate)}</b>
-          <span>/ hour</span>
+          <b>{c.rate > 0 ? formatNPR(c.rate) : "Rate not specified"}</b>
+          {c.rate > 0 && <span>/ {c.unit || "hour"}</span>}
           <small>{c.years} years' experience</small>
         </div>
         <button
@@ -3314,8 +3316,8 @@ function CaregiverCard({ c, saved, onSave, onProfile, onRequest }: any) {
         <button className="button button-secondary" onClick={onProfile}>
           View profile
         </button>
-        <button className="button button-primary" onClick={onRequest}>
-          Request care
+        <button className="button button-primary" onClick={onRequest} disabled={c.acceptingRequests === false}>
+          {c.acceptingRequests === false ? "Not accepting requests" : "Request care"}
         </button>
       </div>
     </article>
