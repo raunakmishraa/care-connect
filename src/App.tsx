@@ -70,6 +70,15 @@ const authErrorMessage = (message: string) => {
   return message;
 };
 
+type CaregiverReviewProfile = {
+  id: string;
+  user_id: string;
+  public_name: string;
+  verification_status: string;
+  is_published: boolean;
+  accepting_requests: boolean;
+};
+
 type ProviderApplicationRecord = {
   id: string;
   user_id: string;
@@ -97,7 +106,7 @@ type ProviderApplicationRecord = {
 };
 
 type Caregiver = {
-  id: number;
+  id: string;
   name: string;
   initials: string;
   role: string;
@@ -109,12 +118,13 @@ type Caregiver = {
   services: string[];
   verified: string;
   availability: string;
+  acceptingRequests: boolean;
   bio: string;
   color: string;
   reviews: number;
   rating: number;
 };
-const caregivers: Caregiver[] = [];
+const EMPTY_CAREGIVERS: Caregiver[] = [];
 type FacilityListing = {
   name: string;
   area: string;
@@ -238,7 +248,10 @@ function App() {
     "signin" | "signup" | "forgot" | "reset"
   >("signin");
   const [authBusy, setAuthBusy] = useState(false);
-  const [saved, setSaved] = useState<number[]>([]);
+  const [saved, setSaved] = useState<string[]>([]);
+  const [caregivers, setCaregivers] = useState<Caregiver[]>(EMPTY_CAREGIVERS);
+  const [caregiversLoading, setCaregiversLoading] = useState(false);
+  const [caregiversError, setCaregiversError] = useState<string | null>(null);
   const [toast, setToast] = useState("");
   const [searchText, setSearchText] = useState("");
   const [serviceFilter, setServiceFilter] = useState("All services");
@@ -274,6 +287,9 @@ function App() {
   const [providerApplications, setProviderApplications] = useState<ProviderApplicationRecord[]>([]);
   const [providerApplicationsLoading, setProviderApplicationsLoading] = useState(false);
   const [providerApplicationNotes, setProviderApplicationNotes] = useState<Record<string, string>>({});
+  const [caregiverReviewProfiles, setCaregiverReviewProfiles] = useState<CaregiverReviewProfile[]>([]);
+  const [caregiverReviewProfilesLoading, setCaregiverReviewProfilesLoading] = useState(false);
+  const [publishingCaregiverId, setPublishingCaregiverId] = useState<string | null>(null);
   const t = lang === "en" ? en : ne;
   const location = useLocation();
   const navigate = useNavigate();
@@ -297,6 +313,80 @@ function App() {
     }
   }, [toast]);
   useEffect(() => setMobileOpen(false), [path]);
+
+  useEffect(() => {
+    if (!supabase) {
+      setCaregivers([]);
+      setCaregiversError("Caregiver listings are unavailable because Supabase is not configured.");
+      return;
+    }
+    const shouldLoadDirectory =
+      path === "/" ||
+      path === "/caregivers" ||
+      /^\/caregivers\/[^/]+\/?$/.test(path);
+    if (!shouldLoadDirectory) return;
+    let active = true;
+    setCaregiversLoading(true);
+    setCaregiversError(null);
+    void (async () => {
+      const { data: profiles, error } = await supabase
+        .from("caregiver_profiles")
+        .select("id, public_name, headline, years_experience, service_areas, rate_amount, rate_unit, accepting_requests, verification_status, is_published")
+        .eq("verification_status", "approved")
+        .eq("is_published", true)
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      const profileRows = profiles || [];
+      if (!profileRows.length) {
+        if (active) setCaregivers([]);
+        return;
+      }
+      const profileIds = profileRows.map((profile: any) => profile.id);
+      const { data: serviceRows, error: serviceError } = await supabase
+        .from("caregiver_services")
+        .select("caregiver_id, service_categories(name_en)")
+        .in("caregiver_id", profileIds);
+      if (serviceError) console.warn("Unable to load caregiver service labels:", serviceError.message);
+      const servicesByProfile = new Map<string, string[]>();
+      (serviceRows || []).forEach((row: any) => {
+        const relation = row.service_categories;
+        const categoryName = Array.isArray(relation) ? relation[0]?.name_en : relation?.name_en;
+        if (!categoryName) return;
+        const current = servicesByProfile.get(row.caregiver_id) || [];
+        current.push(String(categoryName));
+        servicesByProfile.set(row.caregiver_id, current);
+      });
+      const mapped: Caregiver[] = profileRows.map((profile: any, index: number) => {
+        const name = String(profile.public_name || "Caregiver");
+        const initials = name.split(/\s+/).filter(Boolean).slice(0, 2).map((part: string) => part[0].toUpperCase()).join("") || "C";
+        const areas = Array.isArray(profile.service_areas) ? profile.service_areas : [];
+        const headline = String(profile.headline || "Care and daily living support");
+        const rawServices = servicesByProfile.get(profile.id) || [];
+        return {
+          id: String(profile.id), name, initials, role: headline,
+          area: areas.join(", ") || "Service area not specified",
+          years: Number(profile.years_experience || 0),
+          rate: Number(profile.rate_amount || 0), unit: String(profile.rate_unit || "hour"),
+          languages: [], services: rawServices.length ? rawServices : ["Daily living support"],
+          verified: "Verified",
+          availability: profile.accepting_requests ? "Accepting requests" : "Currently unavailable",
+          acceptingRequests: Boolean(profile.accepting_requests),
+          bio: headline, color: ["sage", "blue", "gold", "rose"][index % 4],
+          reviews: 0, rating: 0,
+        };
+      });
+      if (active) setCaregivers(mapped);
+    })().catch((error: any) => {
+      console.error("Unable to load public caregiver listings:", error);
+      if (active) {
+        setCaregivers([]);
+        setCaregiversError("We couldn't load caregiver listings right now. Please try again shortly.");
+      }
+    }).finally(() => {
+      if (active) setCaregiversLoading(false);
+    });
+    return () => { active = false; };
+  }, [path]);
   useEffect(() => {
     let active = true;
     const applySession = async (session: any) => {
@@ -491,6 +581,57 @@ function App() {
       });
     return () => { active = false; };
   }, [path, userRoles]);
+
+  useEffect(() => {
+    if (path !== "/admin/verifications" || !supabase || !userRoles.includes("admin")) return;
+    let active = true;
+    setCaregiverReviewProfilesLoading(true);
+    void supabase
+      .from("caregiver_profiles")
+      .select("id, user_id, public_name, verification_status, is_published, accepting_requests")
+      .eq("is_published", false)
+      .order("created_at", { ascending: false })
+      .then(({ data, error }) => {
+        if (!active) return;
+        if (error) {
+          console.error("Unable to load caregiver verification queue:", error.message);
+          notify("Could not load caregiver profiles for verification. Apply the caregiver publication migration.");
+          setCaregiverReviewProfiles([]);
+        } else {
+          setCaregiverReviewProfiles((data || []) as CaregiverReviewProfile[]);
+        }
+        setCaregiverReviewProfilesLoading(false);
+      });
+    return () => { active = false; };
+  }, [path, userRoles]);
+
+  const publishCaregiverProfile = async (profile: CaregiverReviewProfile) => {
+    if (!supabase || !userRoles.includes("admin")) {
+      notify("Only an administrator can publish caregiver profiles.");
+      return;
+    }
+    const applicationApproved = providerApplications.some(
+      (application) => application.user_id === profile.user_id &&
+        application.application_type === "caregiver" &&
+        application.status === "approved",
+    );
+    if (!applicationApproved) {
+      notify("Approve the caregiver application before completing verification.");
+      return;
+    }
+    setPublishingCaregiverId(profile.id);
+    const { error } = await supabase.rpc("admin_publish_caregiver_profile", {
+      p_profile_id: profile.id,
+    });
+    setPublishingCaregiverId(null);
+    if (error) {
+      console.error("Unable to publish caregiver profile:", error);
+      notify("Publication failed: " + error.message);
+      return;
+    }
+    setCaregiverReviewProfiles((current) => current.filter((item) => item.id !== profile.id));
+    notify("Caregiver verified and published. The public directory will show this profile.");
+  };
 
   const saveProfile = async () => {
     if (!supabase || !authUserId) return;
@@ -853,7 +994,7 @@ function App() {
               ? b.years - a.years
               : b.rating - a.rating,
         ),
-    [searchText, serviceFilter, sort],
+    [caregivers, searchText, serviceFilter, sort],
   );
   const requestCare = (c: Caregiver) => {
     if (!signedIn) {
@@ -1222,6 +1363,8 @@ function App() {
           {path === "/caregivers" && (
             <CaregiverDirectory
               list={filtered}
+              loading={caregiversLoading}
+              loadError={caregiversError}
               searchText={searchText}
               setSearchText={setSearchText}
               serviceFilter={serviceFilter}
@@ -2362,6 +2505,41 @@ function App() {
             </div>
           )}
           {providerApplications.length > pendingApplications.length && <p className="muted tiny">{pendingApplications.length} application(s) still need a decision.</p>}
+          <div className="panel" style={{ marginTop: 24 }}>
+            <h2>Caregiver verification and publication</h2>
+            <p className="muted">Only publish after reviewing the required identity and qualification evidence. Publishing marks the profile approved and makes it visible in the public directory.</p>
+            {caregiverReviewProfilesLoading ? (
+              <p>Loading unpublished caregiver profiles…</p>
+            ) : caregiverReviewProfiles.length === 0 ? (
+              <p className="muted">No unpublished caregiver profiles need verification.</p>
+            ) : (
+              <div className="provider-review-list">
+                {caregiverReviewProfiles.map((profile) => {
+                  const applicationApproved = providerApplications.some((application) =>
+                    application.user_id === profile.user_id &&
+                    application.application_type === "caregiver" &&
+                    application.status === "approved"
+                  );
+                  return (
+                    <article className="provider-review-card" key={profile.id}>
+                      <div>
+                        <h3>{profile.public_name}</h3>
+                        <p className="muted">Verification status: {profile.verification_status.replaceAll("_", " ")} · Requests: {profile.accepting_requests ? "enabled" : "disabled"}</p>
+                        <p className="tiny muted">Profile ID: {profile.id}</p>
+                      </div>
+                      <button
+                        className="button button-primary small"
+                        disabled={!applicationApproved || publishingCaregiverId === profile.id}
+                        onClick={() => void publishCaregiverProfile(profile)}
+                      >
+                        {publishingCaregiverId === profile.id ? "Publishing…" : "Verify & publish"}
+                      </button>
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </>
       );
     }
@@ -3090,10 +3268,10 @@ function CaregiverCard({ c, saved, onSave, onProfile, onRequest }: any) {
       </div>
       <div className="caregiver-name-row">
         <h3>{c.name}</h3>
-        <span className="rating">
+        {c.rating > 0 && <span className="rating">
           <Star size={14} fill="currentColor" />
           {c.rating.toFixed(1)}
-        </span>
+        </span>}
       </div>
       <p className="caregiver-role">{c.role}</p>
       <div className="caregiver-area">
@@ -3122,8 +3300,8 @@ function CaregiverCard({ c, saved, onSave, onProfile, onRequest }: any) {
       </div>
       <div className="caregiver-card-bottom">
         <div className="rate">
-          <b>{formatNPR(c.rate)}</b>
-          <span>/ hour</span>
+          <b>{c.rate > 0 ? formatNPR(c.rate) : "Rate not specified"}</b>
+          {c.rate > 0 && <span>/ {c.unit || "hour"}</span>}
           <small>{c.years} years' experience</small>
         </div>
         <button
@@ -3138,8 +3316,8 @@ function CaregiverCard({ c, saved, onSave, onProfile, onRequest }: any) {
         <button className="button button-secondary" onClick={onProfile}>
           View profile
         </button>
-        <button className="button button-primary" onClick={onRequest}>
-          Request care
+        <button className="button button-primary" onClick={onRequest} disabled={c.acceptingRequests === false}>
+          {c.acceptingRequests === false ? "Not accepting requests" : "Request care"}
         </button>
       </div>
     </article>
@@ -3147,6 +3325,8 @@ function CaregiverCard({ c, saved, onSave, onProfile, onRequest }: any) {
 }
 function CaregiverDirectory({
   list,
+  loading = false,
+  loadError = null,
   searchText,
   setSearchText,
   serviceFilter,
@@ -3306,7 +3486,11 @@ function CaregiverDirectory({
           </select>
         </label>
       </div>
-      {list.length ? (
+      {loading ? (
+        <div className="empty-inline" role="status">Loading approved caregiver listings…</div>
+      ) : loadError ? (
+        <EmptyState icon={<AlertTriangle />} title="Caregiver listings unavailable" text={loadError} action="Retry" onClick={() => window.location.reload()} />
+      ) : list.length ? (
         <div className="caregiver-grid directory-grid">
           {list.map((c: Caregiver) => (
             <CaregiverCard
@@ -3322,8 +3506,8 @@ function CaregiverDirectory({
       ) : (
         <EmptyState
           icon={<Search />}
-          title="No caregivers match these filters"
-          text="Try another area or remove a service filter to see more options."
+          title="No published caregivers yet"
+          text="Approved caregiver profiles appear after verification and publication. Try again later or clear your filters."
           action="Clear filters"
           onClick={() => {
             setSearchText("");
