@@ -3421,7 +3421,7 @@ function CaregiverCard({ c, saved, onSave, onProfile, onRequest }: any) {
           View profile
         </button>
         {c.acceptingRequests === false ? (
-          <span className="caregiver-unavailable-status" role="status" aria-label="This caregiver is not accepting requests">Not accepting requests</span>
+          <button className="button button-secondary caregiver-unavailable-status" type="button" disabled aria-label="This caregiver is not accepting requests">Not accepting requests</button>
         ) : (
           <button className="button button-primary" onClick={onRequest}>Request care</button>
         )}
