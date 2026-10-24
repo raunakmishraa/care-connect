@@ -420,7 +420,7 @@ function App() {
       }
       setSignedIn(true);
       setAuthUserId(session.user.id);
-      setAuthLoading(true);
+      // Do not re-block the page for auth events when the session is already available.
       if (!supabase) {
         setUserRoles([]);
         setRole(null);
@@ -464,6 +464,9 @@ function App() {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, session) => {
+      // Token refreshes do not change identity or roles; avoid re-running role checks
+      // and toggling protected pages into a visible loading state for these events.
+      if (event === "TOKEN_REFRESHED") return;
       if (event === "PASSWORD_RECOVERY") {
         setAuthMode("reset");
         setModal("signin");
@@ -496,7 +499,7 @@ function App() {
 
     let active = true;
     const refreshWorkspaceRoles = async () => {
-      setAuthLoading(true);
+      // Revalidate permissions in the background without blocking/remounting the page.
       const { data: sessionData, error: sessionError } =
         await supabase.auth.getSession();
       if (!active) return;
@@ -1144,7 +1147,7 @@ function App() {
           </nav>
         )}
       </header>
-      {routeNeedsAuth && !routeAuthorized && (
+      {routeNeedsAuth && !routeAuthorized && !authLoading && (
         <main className="page-container info-page">
           <div className="info-hero">
             <span className="eyebrow">RESTRICTED AREA</span>

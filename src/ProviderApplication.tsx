@@ -31,6 +31,7 @@ export default function ProviderApplication({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [userId, setUserId] = useState("");
+  const [draftLoaded, setDraftLoaded] = useState(false);
   const [existing, setExisting] = useState<ExistingApplication | null>(null);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -88,6 +89,40 @@ export default function ProviderApplication({
         const latest = rows[0] as ExistingApplication;
         if (latest.status !== "rejected") setExisting(latest);
       }
+
+      // Restore a private, tab-scoped draft after profile defaults have loaded.
+      // The key is scoped to both the authenticated user and application type.
+      const draftKey = `aashrayacare:provider-application-draft:${user.id}:${type}`;
+      if (!rows?.[0] || rows[0].status === "rejected") {
+        try {
+          const rawDraft = sessionStorage.getItem(draftKey);
+          if (rawDraft) {
+            const draft = JSON.parse(rawDraft) as Record<string, unknown>;
+            if (typeof draft.name === "string") setName(draft.name);
+            if (typeof draft.email === "string") setEmail(draft.email);
+            if (typeof draft.phone === "string") setPhone(draft.phone);
+            if (typeof draft.serviceArea === "string") setServiceArea(draft.serviceArea);
+            if (typeof draft.experience === "string") setExperience(draft.experience);
+            if (Array.isArray(draft.services)) setServices(draft.services.filter((item): item is string => typeof item === "string"));
+            if (typeof draft.rate === "string") setRate(draft.rate);
+            if (typeof draft.rateUnit === "string") setRateUnit(draft.rateUnit);
+            if (typeof draft.facilityName === "string") setFacilityName(draft.facilityName);
+            if (typeof draft.facilityType === "string") setFacilityType(draft.facilityType);
+            if (typeof draft.facilityAddress === "string") setFacilityAddress(draft.facilityAddress);
+            if (typeof draft.facilityDescription === "string") setFacilityDescription(draft.facilityDescription);
+            if (typeof draft.facilityServices === "string") setFacilityServices(draft.facilityServices);
+            if (typeof draft.capacity === "string") setCapacity(draft.capacity);
+            if (typeof draft.monthlyFee === "string") setMonthlyFee(draft.monthlyFee);
+            if (typeof draft.registrationNumber === "string") setRegistrationNumber(draft.registrationNumber);
+            if (typeof draft.notes === "string") setNotes(draft.notes);
+          }
+        } catch (draftError) {
+          console.warn("Unable to restore provider application draft:", draftError);
+        }
+      } else {
+        try { sessionStorage.removeItem(draftKey); } catch { /* Storage may be unavailable. */ }
+      }
+      setDraftLoaded(true);
       setLoading(false);
     })().catch((error) => {
       console.error("Unable to load provider application:", error);
@@ -95,6 +130,25 @@ export default function ProviderApplication({
     });
     return () => { active = false; };
   }, [type]);
+
+  useEffect(() => {
+    if (!draftLoaded || !userId || existing || loading) return;
+    const draftKey = `aashrayacare:provider-application-draft:${userId}:${type}`;
+    const draft = {
+      name, email, phone, serviceArea, experience, services, rate, rateUnit,
+      facilityName, facilityType, facilityAddress, facilityDescription,
+      facilityServices, capacity, monthlyFee, registrationNumber, notes,
+    };
+    try {
+      sessionStorage.setItem(draftKey, JSON.stringify(draft));
+    } catch (draftError) {
+      console.warn("Unable to save provider application draft:", draftError);
+    }
+  }, [
+    draftLoaded, userId, type, existing, loading, name, email, phone, serviceArea,
+    experience, services, rate, rateUnit, facilityName, facilityType, facilityAddress,
+    facilityDescription, facilityServices, capacity, monthlyFee, registrationNumber, notes,
+  ]);
 
   const toggleService = (service: string) => {
     setServices((current) =>
@@ -163,6 +217,7 @@ export default function ProviderApplication({
       return;
     }
     setExisting(data as ExistingApplication);
+    try { sessionStorage.removeItem(`aashrayacare:provider-application-draft:${userId}:${type}`); } catch { /* Storage may be unavailable. */ }
     onNotify("Application submitted. Your account has not been granted provider access.");
   };
 
