@@ -343,13 +343,13 @@ function App() {
       const profileIds = profileRows.map((profile: any) => profile.id);
       const { data: serviceRows, error: serviceError } = await supabase
         .from("caregiver_services")
-        .select("caregiver_id, service_categories(name)")
+        .select("caregiver_id, service_categories(name_en)")
         .in("caregiver_id", profileIds);
       if (serviceError) console.warn("Unable to load caregiver service labels:", serviceError.message);
       const servicesByProfile = new Map<string, string[]>();
       (serviceRows || []).forEach((row: any) => {
         const relation = row.service_categories;
-        const categoryName = Array.isArray(relation) ? relation[0]?.name : relation?.name;
+        const categoryName = Array.isArray(relation) ? relation[0]?.name_en : relation?.name_en;
         if (!categoryName) return;
         const current = servicesByProfile.get(row.caregiver_id) || [];
         current.push(String(categoryName));
