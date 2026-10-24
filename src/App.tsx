@@ -648,8 +648,22 @@ function App() {
       .eq("id", authUserId);
     setProfileSaving(false);
     if (error) {
-      console.error("Unable to save profile:", error.message);
-      notify("We couldn't save your profile. Check your connection and try again.");
+      console.error("Unable to save profile:", {
+        message: error.message,
+        code: error.code,
+        details: error.details,
+        hint: error.hint,
+      });
+      const detail = [error.message, error.details, error.hint]
+        .filter(Boolean)
+        .join(" ");
+      if (error.code === "42501" || /permission denied|row-level security|not allowed/i.test(detail)) {
+        notify("Supabase blocked this profile update. Apply the profile permissions migration, then sign out and back in.");
+      } else if (/no api key found|no apikey|api key/i.test(detail)) {
+        notify("The app is missing its Supabase public API key. Check VITE_SUPABASE_ANON_KEY or VITE_SUPABASE_PUBLISHABLE_KEY in deployment settings, then rebuild.");
+      } else {
+        notify(`We couldn't save your profile: ${error.message || "Unknown database error"}${error.code ? ` (${error.code})` : ""}`);
+      }
       return;
     }
     if (supabase) {
