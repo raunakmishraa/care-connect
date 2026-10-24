@@ -324,10 +324,7 @@ function App() {
     let active = true;
     setCaregiverStatusLoading(true);
     void supabase
-      .from("caregiver_profiles")
-      .select("id, verification_status, is_published, accepting_requests")
-      .eq("user_id", authUserId)
-      .maybeSingle()
+      .rpc("caregiver_get_own_listing_status")
       .then(({ data, error }) => {
         if (!active) return;
         if (error) {
@@ -336,11 +333,12 @@ function App() {
           setOwnCaregiverStatus(null);
           return;
         }
-        setOwnCaregiverStatus(data ? {
-          id: String(data.id),
-          verificationStatus: String(data.verification_status || "pending"),
-          isPublished: Boolean(data.is_published),
-          acceptingRequests: Boolean(data.accepting_requests),
+        const row = Array.isArray(data) ? data[0] : data;
+        setOwnCaregiverStatus(row ? {
+          id: String(row.id),
+          verificationStatus: String(row.verification_status || "pending"),
+          isPublished: Boolean(row.is_published),
+          acceptingRequests: Boolean(row.accepting_requests),
         } : null);
       })
       .finally(() => { if (active) setCaregiverStatusLoading(false); });
@@ -2791,8 +2789,22 @@ function App() {
             }
           />
           <div className="notice-bar">
-            <Clock3 size={18} /> Verification: Under review · Your profile is
-            not publicly listed yet.
+            <Clock3 size={18} />
+            {ownCaregiverStatus ? (
+              <>
+                Verification: <b>{ownCaregiverStatus.verificationStatus.replace(/_/g, " ")}</b>
+                {" · "}
+                Listing: <b>{ownCaregiverStatus.isPublished ? "Visible to families" : "Hidden from families"}</b>
+                {" · "}
+                Requests: <b>{ownCaregiverStatus.acceptingRequests ? "Accepting requests" : "Not accepting requests"}</b>
+              </>
+            ) : caregiverStatusLoading ? (
+              "Loading your caregiver verification and listing status…"
+            ) : (
+              "Your current verification and listing status could not be loaded. Open My profile to review listing controls."
+            )}
+            {" "}
+            <button className="text-link" onClick={() => go("/caregiver/profile")}>Manage listing <ArrowRight size={14} /></button>
           </div>
           <div className="stats-grid">
             <Stat
