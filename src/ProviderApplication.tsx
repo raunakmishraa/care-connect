@@ -49,6 +49,8 @@ export default function ProviderApplication({
   const [capacity, setCapacity] = useState("");
   const [monthlyFee, setMonthlyFee] = useState("");
   const [registrationNumber, setRegistrationNumber] = useState("");
+  const [caregiverLicenseFile, setCaregiverLicenseFile] = useState<File | null>(null);
+  const [facilityRegistrationFile, setFacilityRegistrationFile] = useState<File | null>(null);
   const [notes, setNotes] = useState("");
 
   useEffect(() => {
@@ -178,7 +180,29 @@ export default function ProviderApplication({
       onNotify("Enter your care home's name and full address.");
       return;
     }
+    const selectedDocument = type === "caregiver" ? caregiverLicenseFile : facilityRegistrationFile;
+    if (selectedDocument) {
+      const allowedTypes = ["application/pdf", "image/jpeg", "image/png", "image/webp"];
+      if (!allowedTypes.includes(selectedDocument.type) || selectedDocument.size > 10 * 1024 * 1024) {
+        onNotify("Upload a PDF, JPG, PNG or WEBP file up to 10 MB.");
+        return;
+      }
+    }
     setSaving(true);
+    let documentPath: string | null = null;
+    if (selectedDocument) {
+      const safeName = selectedDocument.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+      documentPath = `${userId}/${type}/${crypto.randomUUID()}-${safeName}`;
+      const { error: uploadError } = await supabase.storage
+        .from("provider-verification-documents")
+        .upload(documentPath, selectedDocument, { contentType: selectedDocument.type, upsert: false });
+      if (uploadError) {
+        setSaving(false);
+        console.error("Provider verification document upload failed:", uploadError.message);
+        onNotify("The document could not be uploaded. Please check the file and try again.");
+        return;
+      }
+    }
     const payload = {
       user_id: userId,
       application_type: type,
@@ -200,6 +224,8 @@ export default function ProviderApplication({
       facility_capacity: type === "care_home" && capacity ? Number(capacity) : null,
       monthly_fee: type === "care_home" && monthlyFee ? Number(monthlyFee) : null,
       registration_number: type === "care_home" ? registrationNumber.trim() || null : null,
+      caregiver_license_file_path: type === "caregiver" ? documentPath : null,
+      facility_registration_file_path: type === "care_home" ? documentPath : null,
       additional_notes: notes.trim() || null,
       status: "submitted",
     };
@@ -305,6 +331,17 @@ export default function ProviderApplication({
               <label className="application-field-wide">Facility description <textarea rows={4} value={facilityDescription} onChange={(event) => setFacilityDescription(event.target.value)} maxLength={3000} placeholder="Describe the care environment and services." /></label>
             </div>
           </>
+        )}
+        {isCaregiver ? (
+          <label className="application-notes">Caregiver licence / certificate (optional)
+            <input type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp" onChange={(event) => setCaregiverLicenseFile(event.target.files?.[0] || null)} />
+            <span className="muted tiny">Private to you and authorized reviewers. PDF, JPG, PNG or WEBP; maximum 10 MB.</span>
+          </label>
+        ) : (
+          <label className="application-notes">Company / facility registration document (optional)
+            <input type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp" onChange={(event) => setFacilityRegistrationFile(event.target.files?.[0] || null)} />
+            <span className="muted tiny">Private to you and authorized reviewers. PDF, JPG, PNG or WEBP; maximum 10 MB.</span>
+          </label>
         )}
         <label className="application-notes">Additional information (optional) <textarea rows={3} value={notes} onChange={(event) => setNotes(event.target.value)} maxLength={2000} placeholder="Anything else the review team should know?" /></label>
         <div className="application-submit-row">
