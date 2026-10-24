@@ -943,6 +943,7 @@ function App() {
     notify("You have signed out.");
   };
   const isWorkspace =
+    path === "/profile" ||
     path === "/app" ||
     path.startsWith("/app/") ||
     path === "/caregiver" ||
@@ -965,7 +966,7 @@ function App() {
             : null;
   const isProviderApplication = path === "/apply/caregiver" || path === "/apply/care-home";
   const routeNeedsAuth =
-    !!requiredRole || isCaregiverDetail || isCareHomeDetail || isProviderApplication;
+    path === "/profile" || !!requiredRole || isCaregiverDetail || isCareHomeDetail || isProviderApplication;
   const hasRequiredRole = !requiredRole || userRoles.includes(requiredRole);
   const routeAuthorized =
     !routeNeedsAuth || (signedIn && !authLoading && hasRequiredRole);
@@ -1113,18 +1114,9 @@ function App() {
             {signedIn ? (
               <button
                 className="avatar-btn"
-                onClick={() =>
-                  go(
-                    role === "admin"
-                      ? "/admin"
-                      : role === "caregiver"
-                        ? "/caregiver"
-                        : role === "facility"
-                          ? "/facility"
-                          : "/app",
-                  )
-                }
-                aria-label="Open dashboard"
+                onClick={() => go("/profile")}
+                aria-label="Edit profile"
+                title="Edit profile"
               >
                 {profileInitials}
               </button>
@@ -1164,6 +1156,10 @@ function App() {
             ))}
             {signedIn ? (
               <>
+                <Link to="/profile" onClick={() => setMobileOpen(false)}>
+                  Edit profile
+                  <ChevronRight size={16} />
+                </Link>
                 <Link
                   to={role === "admin" ? "/admin" : role === "caregiver" ? "/caregiver" : role === "facility" ? "/facility" : "/app"}
                   onClick={() => setMobileOpen(false)}
@@ -1850,7 +1846,7 @@ function App() {
     </div>
   );
   function renderWorkspace() {
-    if (path === "/app/profile") {
+    if (path === "/profile" || path === "/app/profile") {
       return (
         <>
           <PageHeader
@@ -1863,7 +1859,7 @@ function App() {
               <div className="avatar-btn" style={{ width: 64, height: 64, minWidth: 64, fontSize: 20, display: "grid", placeItems: "center" }} aria-hidden="true">{profileInitials}</div>
               <div>
                 <h2 style={{ margin: 0 }}>{displayName || "Your profile"}</h2>
-                <p className="muted" style={{ margin: "4px 0 0" }}>Family account</p>
+                <p className="muted" style={{ margin: "4px 0 0" }}>{userRoles.includes("admin") ? "Administrator account" : userRoles.includes("caregiver") ? "Caregiver account" : userRoles.includes("facility_manager") ? "Care facility account" : "Family account"}</p>
               </div>
             </div>
             <form style={{ display: "grid", gap: 18 }} onSubmit={(event) => { event.preventDefault(); void saveProfile(); }}>
@@ -3317,9 +3313,11 @@ function CaregiverCard({ c, saved, onSave, onProfile, onRequest }: any) {
         <button className="button button-secondary" onClick={onProfile}>
           View profile
         </button>
-        <button className="button button-primary" onClick={onRequest} disabled={c.acceptingRequests === false}>
-          {c.acceptingRequests === false ? "Not accepting requests" : "Request care"}
-        </button>
+        {c.acceptingRequests === false ? (
+          <span className="caregiver-unavailable-status" role="status" aria-label="This caregiver is not accepting requests">Not accepting requests</span>
+        ) : (
+          <button className="button button-primary" onClick={onRequest}>Request care</button>
+        )}
       </div>
     </article>
   );
