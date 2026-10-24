@@ -141,3 +141,21 @@ html[data-theme="dark"]{color-scheme:dark;--bg:#101715;--surface:#19211f;--muted
 .provider-review-actions{flex-wrap:wrap;justify-content:flex-end}
 .provider-review-actions .button:disabled{opacity:.55;cursor:not-allowed}
 @media(max-width:650px){.provider-review-heading{flex-direction:column}.provider-review-details{grid-template-columns:minmax(0,1fr)}.provider-review-details p:last-child{grid-column:auto}.provider-review-actions{display:grid;grid-template-columns:minmax(0,1fr)}.provider-review-actions .button{width:100%}}
+
+
+/* Floating support chatbot */
+.support-chatbot{position:fixed;right:20px;bottom:20px;z-index:1200;font-family:inherit}
+.support-chat-launcher{display:flex;align-items:center;gap:9px;border:0;border-radius:999px;padding:13px 17px;background:var(--primary);color:white;box-shadow:0 8px 26px #0002;cursor:pointer;font:inherit;font-weight:700}
+.support-chat-panel{position:absolute;right:0;bottom:64px;width:min(370px,calc(100vw - 28px));height:min(520px,calc(100dvh - 120px));display:flex;flex-direction:column;overflow:hidden;border:1px solid var(--border);border-radius:16px;background:var(--surface);color:var(--text);box-shadow:0 16px 48px #0003}
+.support-chat-panel>header{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 16px;border-bottom:1px solid var(--border)}
+.support-chat-panel>header div{display:grid;gap:3px}
+.support-chat-panel>header small{font-size:11px;color:var(--secondary)}
+.support-chat-panel>header button,.support-chat-panel form button{display:grid;place-items:center;border:0;border-radius:9px;padding:9px;background:var(--soft);color:var(--text);cursor:pointer}
+.support-chat-messages{flex:1;overflow:auto;display:flex;flex-direction:column;gap:10px;padding:14px}
+.support-chat-message{max-width:92%;margin:0;padding:10px 12px;border-radius:12px;font-size:13px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere}
+.support-chat-message.bot{align-self:flex-start;background:var(--soft)}
+.support-chat-message.user{align-self:flex-end;background:var(--primary);color:white}
+.support-chat-panel form{display:flex;align-items:center;gap:8px;padding:12px;border-top:1px solid var(--border)}
+.support-chat-panel form input{flex:1;min-width:0;padding:11px 12px;border:1px solid var(--border);border-radius:9px;background:var(--surface);color:var(--text);font:inherit}
+.support-chat-panel form button:disabled{opacity:.45;cursor:not-allowed}
+@media(max-width:480px){.support-chatbot{right:12px;bottom:12px}.support-chat-launcher{padding:12px 14px}.support-chat-panel{right:0;bottom:58px}}
