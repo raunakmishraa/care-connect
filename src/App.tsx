@@ -1147,7 +1147,7 @@ function App() {
           </nav>
         )}
       </header>
-      {routeNeedsAuth && !routeAuthorized && (
+      {routeNeedsAuth && !routeAuthorized && !authLoading && (
         <main className="page-container info-page">
           <div className="info-hero">
             <span className="eyebrow">RESTRICTED AREA</span>
