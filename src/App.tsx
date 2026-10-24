@@ -1278,6 +1278,7 @@ function App() {
                       ["/caregiver/schedule", CalendarDays, "Schedule"],
                       ["/caregiver/profile", UserRound, "Services & rates"],
                       ["/caregiver/messages", MessageCircle, "Messages"],
+                      ["/profile", UserRound, "My profile"],
                     ]
                   : workspaceRole === "facility"
                     ? [
@@ -1294,7 +1295,7 @@ function App() {
                         ],
                         ["/admin/incidents", Shield, "Safety incidents"],
                         ["/admin/support", HelpCircle, "Support cases"],
-                      ]
+                        ["/profile", UserRound, "My profile"],                      ]
               ).map(([p, Icon, label]: any) => (
                 <NavLink
                   to={p}
