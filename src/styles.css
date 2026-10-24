@@ -159,3 +159,42 @@ html[data-theme="dark"]{color-scheme:dark;--bg:#101715;--surface:#19211f;--muted
 .support-chat-panel form input{flex:1;min-width:0;padding:11px 12px;border:1px solid var(--border);border-radius:9px;background:var(--surface);color:var(--text);font:inherit}
 .support-chat-panel form button:disabled{opacity:.45;cursor:not-allowed}
 @media(max-width:480px){.support-chatbot{right:12px;bottom:12px}.support-chat-launcher{padding:12px 14px}.support-chat-panel{right:0;bottom:58px}}
+
+
+/* Keep native select controls and their option menus legible in both themes. */
+select {
+  color: var(--text);
+  background-color: var(--surface);
+  border-color: var(--border);
+  color-scheme: light;
+}
+select option,
+select optgroup {
+  color: var(--text);
+  background-color: var(--surface);
+}
+html[data-theme="dark"] select {
+  color-scheme: dark;
+  color: var(--text);
+  background-color: var(--surface);
+}
+html[data-theme="dark"] select option,
+html[data-theme="dark"] select optgroup {
+  color: #f0f5f3;
+  background-color: #19211f;
+}
+.caregiver-unavailable-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 9px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius, 12px);
+  background: var(--muted);
+  color: var(--secondary);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+  cursor: not-allowed;
+}
