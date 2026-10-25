@@ -7,6 +7,7 @@ const DB_NAME = "aashrayacare-secure-messages";
 const STORE_NAME = "identities";
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
+const publishedIdentities = new Set<string>();
 
 function openKeyStore(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -72,12 +73,15 @@ export async function ensureMessageIdentity(
     };
     await writeIdentity(userId, identity);
   }
-  const { error } = await client.from("user_message_keys").upsert({
-    user_id: userId,
-    public_key_jwk: identity.publicJwk,
-    updated_at: new Date().toISOString(),
-  }, { onConflict: "user_id" });
-  if (error) throw new Error("Unable to publish your public message key: " + error.message);
+  if (!publishedIdentities.has(userId)) {
+    const { error } = await client.from("user_message_keys").upsert({
+      user_id: userId,
+      public_key_jwk: identity.publicJwk,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "user_id" });
+    if (error) throw new Error("Unable to publish your public message key: " + error.message);
+    publishedIdentities.add(userId);
+  }
 }
 
 async function sharedKey(
