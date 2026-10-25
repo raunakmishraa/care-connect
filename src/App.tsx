@@ -868,6 +868,33 @@ function App() {
     notify("Profile information updated.");
   };
 
+  const saveFacilityListing = async () => {
+    const client=supabase;
+    if(!client||!authUserId||!userRoles.includes("facility_manager")){notify("Sign in with the facility manager account to edit this listing.");return;}
+    if(!ownFacilityProfile?.id){notify("No facility profile is linked to this account yet. Submit a care-home application and ask an administrator to approve it first.");return;}
+    if(!facilityDraft.name.trim()||!facilityDraft.area.trim()){notify("Facility name and service area are required.");return;}
+    const fee=facilityDraft.monthlyFee.trim()===""?null:Number(facilityDraft.monthlyFee);
+    const capacity=facilityDraft.capacity.trim()===""?null:Number(facilityDraft.capacity);
+    if(fee!==null&&(!Number.isFinite(fee)||fee<0)){notify("Enter a valid non-negative monthly fee.");return;}
+    if(capacity!==null&&(!Number.isInteger(capacity)||capacity<0)){notify("Capacity must be a whole number zero or greater.");return;}
+    setFacilitySaving(true);
+    const {error}=await client.from("care_facilities").update({
+      name:facilityDraft.name.trim(),
+      area:facilityDraft.area.trim(),
+      facility_type:facilityDraft.type.trim()||"Residential care",
+      description:facilityDraft.description.trim()||null,
+      services:facilityDraft.services.split(",").map(x=>x.trim()).filter(Boolean),
+      amenities:facilityDraft.amenities.split(",").map(x=>x.trim()).filter(Boolean),
+      capacity,
+      indicative_monthly_fee:fee,
+      availability_note:facilityDraft.availability.trim()||null,
+      updated_at:new Date().toISOString(),
+    }).eq("id",ownFacilityProfile.id).eq("manager_user_id",authUserId);
+    setFacilitySaving(false);
+    if(error){notify("Facility listing couldn't be saved: "+error.message);return;}
+    notify("Facility listing saved. Approval and publication status are unchanged.");
+  };
+
   const updateOwnCaregiverStatus = async (changes: { acceptingRequests?: boolean; isPublished?: boolean }) => {
     if (!supabase || !authUserId || !userRoles.includes("caregiver") || !ownCaregiverStatus) {
       notify("Only the signed-in caregiver can change their own listing status.");
@@ -2597,46 +2624,21 @@ function App() {
       );
     }
     if (path === "/facility/listing") {
-      return (
-        <>
-          <PageHeader
-            eyebrow="FACILITY SPACE"
-            title="Facility listing"
-            subtitle="Review the public information families see."
-          />
-          <div className="form-panel narrow">
-            <label>
-              Facility name
-              <input defaultValue="Himalayan Care Residence" />
-            </label>
-            <label>
-              Services and amenities
-              <textarea
-                rows={3}
-                defaultValue="24-hour assistance, shared rooms, garden"
-              />
-            </label>
-            <label>
-              Indicative monthly fees (NPR)
-              <input defaultValue="38000" type="number" />
-            </label>
-            <div className="inline-note">
-              <Clock3 size={17} /> Listing status: <b>Under review</b>. Only
-              approved facilities can be published.
-            </div>
-            <button
-              className="button button-primary"
-              onClick={() =>
-                notify(
-                  "Draft saved locally. Evidence submission and approval require the backend.",
-                )
-              }
-            >
-              Save draft
-            </button>
-          </div>
-        </>
-      );
+      return <>
+        <PageHeader eyebrow="FACILITY SPACE" title="Facility listing" subtitle="Update the real facility profile associated with your manager account. Approval and publication remain controlled by review."/>
+        {!ownFacilityProfile ? <EmptyState icon={<House/>} title="No facility profile is linked" text="Submit a care-home application first. An administrator creates the facility profile after approval; this screen never creates or publishes a facility by itself." action="View application guidance" onClick={()=>go("/apply/care-home")}/> : <div className="form-panel narrow">
+          <div className="inline-note"><Clock3 size={17}/> Listing status: <b>{ownFacilityProfile.verificationStatus.replace(/_/g," ")}</b> · {ownFacilityProfile.isPublished?"Published":"Not published"}. Editing profile details does not bypass approval.</div>
+          <label>Facility name<input value={facilityDraft.name} onChange={e=>setFacilityDraft(x=>({...x,name:e.target.value}))} required maxLength={160}/></label>
+          <label>Facility type<select value={facilityDraft.type} onChange={e=>setFacilityDraft(x=>({...x,type:e.target.value}))}><option>Residential care</option><option>Assisted living</option><option>Nursing care</option><option>Respite care</option><option>Other</option></select></label>
+          <label>Service area / location<input value={facilityDraft.area} onChange={e=>setFacilityDraft(x=>({...x,area:e.target.value}))} required maxLength={240}/></label>
+          <label>Description<textarea rows={4} value={facilityDraft.description} onChange={e=>setFacilityDraft(x=>({...x,description:e.target.value}))} maxLength={3000}/></label>
+          <label>Services (comma-separated)<textarea rows={2} value={facilityDraft.services} onChange={e=>setFacilityDraft(x=>({...x,services:e.target.value}))} placeholder="Residential support, meals, mobility assistance"/></label>
+          <label>Amenities (comma-separated)<textarea rows={2} value={facilityDraft.amenities} onChange={e=>setFacilityDraft(x=>({...x,amenities:e.target.value}))} placeholder="Accessible bathrooms, garden, shared rooms"/></label>
+          <div className="two-fields"><label>Capacity (beds)<input type="number" min="0" step="1" value={facilityDraft.capacity} onChange={e=>setFacilityDraft(x=>({...x,capacity:e.target.value}))}/></label><label>Indicative monthly fees (NPR)<input type="number" min="0" step="0.01" value={facilityDraft.monthlyFee} onChange={e=>setFacilityDraft(x=>({...x,monthlyFee:e.target.value}))}/></label></div>
+          <label>Availability note<input value={facilityDraft.availability} onChange={e=>setFacilityDraft(x=>({...x,availability:e.target.value}))} maxLength={500} placeholder="Ask us about current room availability"/></label>
+          <button className="button button-primary" disabled={facilitySaving} onClick={()=>void saveFacilityListing()}>{facilitySaving?"Saving…":"Save facility profile"} <Check size={16}/></button>
+        </div>}
+      </>;
     }
     if (path === "/facility/enquiries") {
       return (
