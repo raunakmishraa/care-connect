@@ -4305,13 +4305,16 @@ function RequestWizard({
               value={request.recipient}
               onChange={(e) => set("recipient", e.target.value)}
             >
+              <option value="">Choose a care recipient</option>
               {recipientOptions.map((r: string) => (
-                <option key={r} value={r.split(" · ")[0]}>
-                  {r}
-                </option>
+                <option key={r} value={r.split(" · ")[0]}>{r}</option>
               ))}
             </select>
           </label>
+          <button type="button" className="text-link" onClick={() => { onClose(); window.location.assign("/app/recipients"); }}>
+            + Add a care recipient <ArrowRight size={14} />
+          </button>
+          {recipientOptions.length === 0 && <p className="muted">No recipients saved yet. Add one on the Care recipients page first.</p>}
           <div className="inline-note">
             <LockKeyhole size={16} /> Only share another person's information
             when you have permission to do so.
