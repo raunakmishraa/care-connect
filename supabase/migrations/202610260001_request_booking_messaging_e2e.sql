@@ -55,6 +55,25 @@ alter table public.conversations
 create unique index if not exists conversations_request_uidx on public.conversations(request_id) where request_id is not null;
 create index if not exists care_requests_facility_created_idx on public.care_requests(facility_id,created_at desc) where facility_id is not null;
 
+-- Confirmed requests also create a durable booking record. A facility placement has a
+-- facility target (rather than a caregiver profile) and may not map to the legacy recipient table.
+alter table public.bookings
+  add column if not exists facility_id uuid references public.care_facilities(id) on delete restrict;
+alter table public.bookings alter column caregiver_id drop not null;
+alter table public.bookings alter column recipient_id drop not null;
+alter table public.bookings
+  add constraint bookings_provider_target_check check (
+    (caregiver_id is not null and facility_id is null)
+    or (caregiver_id is null and facility_id is not null)
+  );
+drop policy if exists "Booking parties can read bookings" on public.bookings;
+create policy "Booking parties can read bookings" on public.bookings for select to authenticated using (
+  family_user_id=auth.uid()
+  or exists(select 1 from public.caregiver_profiles cp where cp.id=caregiver_id and cp.user_id=auth.uid())
+  or exists(select 1 from public.care_facilities f where f.id=facility_id and f.manager_user_id=auth.uid())
+);
+
+
 -- Keep existing historic plaintext messages readable by schema, but all new messages
 -- written by this client use ciphertext + IV and leave body NULL.
 alter table public.messages alter column body drop not null;
@@ -109,17 +128,16 @@ create policy "families create requests for approved providers" on public.care_r
   )
 );
 drop policy if exists "providers can respond to care requests" on public.care_requests;
-create policy "providers can respond to care requests" on public.care_requests for update to authenticated
+create policy "providers can ask clarification" on public.care_requests for update to authenticated
   using (
-    exists(select 1 from public.caregiver_profiles cp where cp.id=caregiver_profile_id and cp.user_id=auth.uid())
-    or exists(select 1 from public.care_facilities f where f.id=facility_id and f.manager_user_id=auth.uid())
+    status='pending_response'
+    and (exists(select 1 from public.caregiver_profiles cp where cp.id=caregiver_profile_id and cp.user_id=auth.uid())
+      or exists(select 1 from public.care_facilities f where f.id=facility_id and f.manager_user_id=auth.uid()))
   )
   with check (
-    status in ('pending_response','clarification_requested','accepted_pending_terms','confirmed','completed','cancelled')
-    and (
-      exists(select 1 from public.caregiver_profiles cp where cp.id=caregiver_profile_id and cp.user_id=auth.uid())
-      or exists(select 1 from public.care_facilities f where f.id=facility_id and f.manager_user_id=auth.uid())
-    )
+    status='clarification_requested'
+    and (exists(select 1 from public.caregiver_profiles cp where cp.id=caregiver_profile_id and cp.user_id=auth.uid())
+      or exists(select 1 from public.care_facilities f where f.id=facility_id and f.manager_user_id=auth.uid()))
   );
 
 -- Encrypted clarification messages are readable/writable only by the request parties.
@@ -204,6 +222,19 @@ begin
   if v_request.family_user_id<>auth.uid() then raise exception 'Only the requesting family can confirm this booking'; end if;
   if v_request.status<>'accepted_pending_terms' then raise exception 'This request is not ready for confirmation'; end if;
   update public.care_requests set status='confirmed', confirmed_at=now(), updated_at=now() where id=p_request_id;
+  insert into public.bookings(
+    public_reference, request_id, family_user_id, caregiver_id, facility_id, recipient_id,
+    starts_at, ends_at, agreed_rate, rate_unit, agreed_total, currency, status
+  ) values (
+    coalesce(v_request.reference_code, 'AC-' || left(replace(p_request_id::text,'-',''),12)),
+    p_request_id, v_request.family_user_id, v_request.caregiver_profile_id, v_request.facility_id,
+    (select r.id from public.care_recipients r where r.family_user_id=v_request.family_user_id and r.preferred_name=v_request.recipient_name order by r.created_at limit 1),
+    (v_request.service_date + v_request.start_time) at time zone 'Asia/Kathmandu',
+    (v_request.service_date + v_request.end_time) at time zone 'Asia/Kathmandu',
+    coalesce(v_request.budget_amount,0),
+    case when v_request.provider_type='facility' then 'month' else 'hour' end,
+    coalesce(v_request.budget_amount,0), 'NPR', 'confirmed'
+  ) on conflict (request_id) do update set status='confirmed', updated_at=now();
   if v_request.provider_type='caregiver' then
     select user_id into v_provider_user_id from public.caregiver_profiles where id=v_request.caregiver_profile_id;
   else
