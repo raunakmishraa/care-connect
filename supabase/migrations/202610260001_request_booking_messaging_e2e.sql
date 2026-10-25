@@ -92,6 +92,23 @@ alter table public.care_request_messages add constraint care_request_messages_en
   (ciphertext is not null and iv is not null and message is null)
 );
 
+-- Use a SECURITY DEFINER membership predicate to avoid recursive or overly broad
+-- row-level-security checks on conversation participants.
+create or replace function public.is_conversation_participant(p_conversation_id uuid, p_user_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $
+  select exists(
+    select 1 from public.conversation_participants cp
+    where cp.conversation_id=p_conversation_id and cp.user_id=p_user_id
+  );
+$;
+revoke all on function public.is_conversation_participant(uuid,uuid) from public;
+grant execute on function public.is_conversation_participant(uuid,uuid) to authenticated;
+
 -- Public keys only. Private ECDH keys stay in each participant's browser.
 create table if not exists public.user_message_keys (
   user_id uuid primary key references auth.users(id) on delete cascade,
@@ -277,6 +294,21 @@ grant select,insert,update on public.conversations to authenticated;
 grant select,insert on public.conversation_participants to authenticated;
 grant select,insert on public.messages to authenticated;
 grant select,insert on public.care_request_messages to authenticated;
+
+-- Explicitly scope message history and participant rows to this conversation's two members.
+drop policy if exists "Conversation participants read conversations" on public.conversations;
+create policy "Conversation participants read conversations" on public.conversations
+  for select to authenticated using (public.is_conversation_participant(id,auth.uid()));
+drop policy if exists "Participants read participant list" on public.conversation_participants;
+create policy "Participants read participant list" on public.conversation_participants
+  for select to authenticated using (public.is_conversation_participant(conversation_id,auth.uid()));
+drop policy if exists "Participants read messages" on public.messages;
+create policy "Participants read messages" on public.messages
+  for select to authenticated using (public.is_conversation_participant(conversation_id,auth.uid()));
+drop policy if exists "Participants send messages as self" on public.messages;
+create policy "Participants send messages as self" on public.messages
+  for insert to authenticated with check (sender_user_id=auth.uid() and public.is_conversation_participant(conversation_id,auth.uid()));
+
 
 -- Realtime is optional: the UI also polls, so delivery works even if the table is
 -- not currently enabled in the Supabase Realtime publication.
