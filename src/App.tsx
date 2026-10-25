@@ -279,6 +279,7 @@ function App() {
   const [recipients, setRecipients] = useState<string[]>([]);
   const [requestBusy, setRequestBusy] = useState(false);
   const [clarificationFor, setClarificationFor] = useState<string | null>(null);
+  const [requestMessages, setRequestMessages] = useState<Record<string, Array<{message:string;sender_user_id:string;created_at:string}>>>({});
   const [newRecipient, setNewRecipient] = useState("");
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState<Array<{from:string;text:string;time:string}>>([]);
@@ -339,6 +340,21 @@ function App() {
       setRequests((data||[]).filter((x:any)=>!caregiverView||x.caregiver_profiles?.user_id===authUserId).map((x:any)=>({id:String(x.id),ref:String(x.reference_code),name:String(x.caregiver_profiles?.public_name||"Caregiver"),service:String(x.service),date:`${x.service_date} · ${String(x.start_time).slice(0,5)}–${String(x.end_time).slice(0,5)}`,status:String(x.status).replace(/_/g," "),amount:Number(x.budget_amount||0),caregiverProfileId:String(x.caregiver_profile_id),familyUserId:String(x.family_user_id),recipient:String(x.recipient_name),area:String(x.service_area||""),tasks:String(x.tasks||""),notes:String(x.notes||""),start:String(x.start_time).slice(0,5),end:String(x.end_time).slice(0,5)})));
     })();return()=>{active=false;};
   },[path,authUserId,signedIn,userRoles.join(",")]);
+
+  useEffect(() => {
+    if (!supabase || !userRoles.includes("family") || !requests.length || !path.startsWith("/app")) { setRequestMessages({}); return; }
+    let active = true;
+    const ids = requests.map((r) => r.id);
+    void supabase.from("care_request_messages").select("request_id,message,sender_user_id,created_at").in("request_id", ids).order("created_at", { ascending: true })
+      .then(({ data, error }) => {
+        if (!active) return;
+        if (error) { console.error("Unable to load request clarifications:", error.message); return; }
+        const grouped: Record<string, Array<{message:string;sender_user_id:string;created_at:string}>> = {};
+        (data || []).forEach((row: any) => { (grouped[row.request_id] ||= []).push({message:String(row.message),sender_user_id:String(row.sender_user_id),created_at:String(row.created_at)}); });
+        setRequestMessages(grouped);
+      });
+    return () => { active = false; };
+  }, [requests.map((r) => r.id + ":" + r.status).join(","), path, userRoles.join(",")]);
 
   useEffect(() => {
     if (!["/caregiver", "/caregiver/profile"].includes(path) || !supabase || !authUserId || !userRoles.includes("caregiver")) {
@@ -2063,6 +2079,11 @@ function App() {
                   <span className="eyebrow">{r.ref}</span>
                   <h3>{r.name}</h3>
                   <p>{r.service}</p>
+                  {requestMessages[r.id]?.map((entry, index) => (
+                    <div className="inline-note" key={entry.created_at + index}>
+                      <MessageCircle size={15} /> {entry.sender_user_id === authUserId ? "Your message: " : "Caregiver asks: "}{entry.message}
+                    </div>
+                  ))}
                   <div className="request-meta">
                     <span>
                       <CalendarDays size={14} />
