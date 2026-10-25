@@ -367,7 +367,9 @@ function App() {
 
   useEffect(() => {
     const client=supabase;
-    if(!client||!authUserId||!signedIn||!userRoles.includes("family")||!requests.length||!path.startsWith("/app")){setRequestMessages({});return;}
+    const familyView=userRoles.includes("family")&&path.startsWith("/app");
+    const providerView=(userRoles.includes("caregiver")||userRoles.includes("facility_manager"))&&(path==="/caregiver/requests"||path==="/facility/requests");
+    if(!client||!authUserId||!signedIn||!requests.length||(!familyView&&!providerView)){setRequestMessages({});return;}
     let active=true;const ids=requests.map((r)=>r.id);
     const load=async()=>{
       const {data,error}=await client.from("care_request_messages").select("request_id,message,ciphertext,iv,sender_user_id,created_at").in("request_id",ids).order("created_at");
@@ -383,6 +385,7 @@ function App() {
     void load();const timer=window.setInterval(()=>void load(),4000);
     return()=>{active=false;window.clearInterval(timer);};
   },[requests.map((r)=>r.id+":"+r.status).join(","),path,authUserId,signedIn,userRoles.join(",")]);
+
 
   useEffect(() => {
     const client=supabase;
@@ -4057,6 +4060,7 @@ function CareHomeDirectory({ onOpen, facilities: facilityRows }: any) {
   );
 }
 function FacilityDetail({ facility: f, onBack, onEnquire, onRequest }: any) {
+  if (!f) return <main className="page-container info-page"><div className="info-hero"><span className="eyebrow">CARE HOME DIRECTORY</span><h1>Facility details</h1><p>Loading published facilities… If none appear, the directory has no approved and published facilities yet.</p><button className="button button-secondary" onClick={onBack}>Back to care homes</button></div></main>;
   return (
     <main className="page-container profile-page">
       <div className="breadcrumb">
@@ -4416,7 +4420,7 @@ function RequestWizard({
             />
           </label>
           <label>
-            Indicative budget per hour (NPR)
+            {providerType === "facility" ? "Indicative monthly budget (NPR)" : "Indicative budget per hour (NPR)"}
             <input
               type="number"
               min="0"
