@@ -337,26 +337,107 @@ function App() {
     return()=>{active=false;};
   },[authUserId,signedIn,userRoles.join(",")]);
   useEffect(() => {
+    if(!supabase||!authUserId||!signedIn)return;
+    void ensureMessageIdentity(supabase,authUserId).catch((error)=>console.warn("Secure messaging identity setup did not complete:",error));
+  },[authUserId,signedIn]);
+
+  useEffect(() => {
     if(!supabase||!authUserId||!signedIn){setRequests([]);return;}
     const familyView=userRoles.includes("family")&&path.startsWith("/app");
     const caregiverView=userRoles.includes("caregiver")&&(path==="/caregiver/requests"||path==="/caregiver");
-    if(!familyView&&!caregiverView)return;
+    const facilityView=userRoles.includes("facility_manager")&&(path==="/facility/requests"||path==="/facility");
+    if(!familyView&&!caregiverView&&!facilityView)return;
     let active=true;
     void(async()=>{
-      let q=supabase.from("care_requests").select("id,reference_code,family_user_id,caregiver_profile_id,recipient_name,service,service_date,start_time,end_time,service_area,tasks,notes,budget_amount,status,caregiver_profiles!care_requests_caregiver_profile_id_fkey(public_name,user_id)").order("created_at",{ascending:false});
-      if(familyView)q=q.eq("family_user_id",authUserId);
-      const {data,error}=await q;if(!active)return;
+      let query=supabase.from("care_requests").select("id,reference_code,family_user_id,provider_type,caregiver_profile_id,facility_id,recipient_name,service,service_date,start_time,end_time,service_area,tasks,notes,budget_amount,status,caregiver_profiles!care_requests_caregiver_profile_id_fkey(public_name,user_id),care_facilities!care_requests_facility_id_fkey(name,manager_user_id)").order("created_at",{ascending:false});
+      if(familyView)query=query.eq("family_user_id",authUserId);
+      const {data,error}=await query;if(!active)return;
       if(error){notify("Couldn't load requests: "+error.message);setRequests([]);return;}
-      setRequests((data||[]).filter((x:any)=>!caregiverView||x.caregiver_profiles?.user_id===authUserId).map((x:any)=>({id:String(x.id),ref:String(x.reference_code),name:String(x.caregiver_profiles?.public_name||"Caregiver"),service:String(x.service),date:`${x.service_date} · ${String(x.start_time).slice(0,5)}–${String(x.end_time).slice(0,5)}`,status:String(x.status).replace(/_/g," "),amount:Number(x.budget_amount||0),caregiverProfileId:String(x.caregiver_profile_id),familyUserId:String(x.family_user_id),recipient:String(x.recipient_name),area:String(x.service_area||""),tasks:String(x.tasks||""),notes:String(x.notes||""),start:String(x.start_time).slice(0,5),end:String(x.end_time).slice(0,5)})));
-    })();return()=>{active=false;};
-  },[path,authUserId,signedIn,userRoles.join(",")]);
-  useEffect(() => {
-    if(!supabase||!userRoles.includes("family")||!requests.length||!path.startsWith("/app")){setRequestMessages({});return;}
-    let active=true;const ids=requests.map(x=>x.id);
-    void supabase.from("care_request_messages").select("request_id,message,sender_user_id,created_at").in("request_id",ids).order("created_at")
-      .then(({data,error})=>{if(!active)return;if(error){console.error("Unable to load request messages",error.message);return;}const grouped:Record<string,Array<{message:string;sender_user_id:string;created_at:string}>>={};(data||[]).forEach((x:any)=>{(grouped[x.request_id]||=[]).push({message:String(x.message),sender_user_id:String(x.sender_user_id),created_at:String(x.created_at)});});setRequestMessages(grouped);});
+      const one=(v:any)=>Array.isArray(v)?v[0]:v;
+      setRequests((data||[]).filter((row:any)=>{
+        const type=String(row.provider_type||(row.facility_id?"facility":"caregiver")),cg=one(row.caregiver_profiles),facility=one(row.care_facilities);
+        return familyView||(caregiverView&&type==="caregiver"&&cg?.user_id===authUserId)||(facilityView&&type==="facility"&&facility?.manager_user_id===authUserId);
+      }).map((row:any)=>{
+        const cg=one(row.caregiver_profiles),facility=one(row.care_facilities),providerType=String(row.provider_type||(row.facility_id?"facility":"caregiver")) as "caregiver"|"facility";
+        return {id:String(row.id),ref:String(row.reference_code||"Care request"),name:String(providerType==="facility"?facility?.name||"Care facility":cg?.public_name||"Caregiver"),service:String(row.service||"Care request"),date:`${row.service_date} · ${String(row.start_time).slice(0,5)}–${String(row.end_time).slice(0,5)}`,status:String(row.status).replace(/_/g," "),amount:Number(row.budget_amount||0),caregiverProfileId:String(row.caregiver_profile_id||""),facilityId:row.facility_id?String(row.facility_id):null,providerType,providerUserId:String(providerType==="facility"?facility?.manager_user_id||"":cg?.user_id||""),familyUserId:String(row.family_user_id),recipient:String(row.recipient_name||"Care recipient"),area:String(row.service_area||""),tasks:String(row.tasks||""),notes:String(row.notes||""),start:String(row.start_time||"09:00").slice(0,5),end:String(row.end_time||"12:00").slice(0,5)};
+      }));
+    })();
     return()=>{active=false;};
-  },[requests.map(x=>x.id+":"+x.status).join(","),path,userRoles.join(",")]);
+  },[path,authUserId,signedIn,userRoles.join(",")]);
+
+  useEffect(() => {
+    const client=supabase;
+    if(!client||!authUserId||!signedIn||!userRoles.includes("family")||!requests.length||!path.startsWith("/app")){setRequestMessages({});return;}
+    let active=true;const ids=requests.map((r)=>r.id);
+    const load=async()=>{
+      const {data,error}=await client.from("care_request_messages").select("request_id,message,ciphertext,iv,sender_user_id,created_at").in("request_id",ids).order("created_at");
+      if(!active)return;if(error){console.error("Unable to load request messages",error.message);return;}
+      const grouped:Record<string,Array<{message:string;sender_user_id:string;created_at:string;encrypted?:boolean}>>={};
+      for(const row of data||[]){
+        let body=String(row.message||""),encrypted=false;
+        if(row.ciphertext&&row.iv){try{body=await decryptMessage(client,authUserId,String(row.sender_user_id),String(row.ciphertext),String(row.iv));encrypted=true;}catch{body="Encrypted message unavailable on this device.";encrypted=true;}}
+        (grouped[String(row.request_id)]||=[]).push({message:body,sender_user_id:String(row.sender_user_id),created_at:String(row.created_at),encrypted});
+      }
+      if(active)setRequestMessages(grouped);
+    };
+    void load();const timer=window.setInterval(()=>void load(),4000);
+    return()=>{active=false;window.clearInterval(timer);};
+  },[requests.map((r)=>r.id+":"+r.status).join(","),path,authUserId,signedIn,userRoles.join(",")]);
+
+  useEffect(() => {
+    const client=supabase;
+    if(!client||(path!=="/care-homes"&&!path.startsWith("/care-homes/")&&path!=="/"))return;
+    let active=true;
+    void client.from("care_facilities").select("id,manager_user_id,name,area,facility_type,description,services,indicative_monthly_fee,availability_note").eq("verification_status","approved").eq("is_published",true).order("created_at",{ascending:false}).then(({data,error})=>{
+      if(!active)return;
+      if(error){console.error("Unable to load care facilities:",error.message);setFacilityListings([]);return;}
+      setFacilityListings((data||[]).map((row:any,index:number)=>{
+        const name=String(row.name||"Care facility");
+        return {id:String(row.id),managerUserId:String(row.manager_user_id),monthlyFee:Number(row.indicative_monthly_fee||0),name,area:String(row.area||"Area not provided"),type:String(row.facility_type||"Residential care"),price:row.indicative_monthly_fee?formatNPR(Number(row.indicative_monthly_fee))+" / month":"Fee on enquiry",services:Array.isArray(row.services)?row.services.map(String):[],updated:String(row.availability_note||"Ask for current availability"),initials:name.split(/\s+/).slice(0,2).map((p:string)=>p[0]?.toUpperCase()||"").join(""),color:["mint","blue","rose"][index%3],desc:String(row.description||"Contact this approved facility to discuss care options and availability.")};
+      }));
+    });
+    return()=>{active=false;};
+  },[path]);
+
+  useEffect(() => {
+    const client=supabase;
+    if(!client||!authUserId||!signedIn||!["/app/messages","/caregiver/messages","/facility/messages"].includes(path)){setConversationList([]);setConversationMessages([]);return;}
+    let active=true;setConversationLoading(true);
+    void(async()=>{
+      const {data,error}=await client.from("conversations").select("id,request_id,created_at,care_requests!conversations_request_id_fkey(id,reference_code,family_user_id,provider_type,caregiver_profile_id,facility_id,service,service_date,start_time,end_time,budget_amount,status,caregiver_profiles!care_requests_caregiver_profile_id_fkey(public_name,user_id),care_facilities!care_requests_facility_id_fkey(name,manager_user_id))").not("request_id","is",null).order("created_at",{ascending:false});
+      if(!active)return;
+      if(error){console.error("Unable to load request conversations:",error.message);setConversationList([]);setConversationLoading(false);return;}
+      const one=(v:any)=>Array.isArray(v)?v[0]:v;
+      const mapped=(data||[]).map((convo:any)=>{
+        const req=one(convo.care_requests);if(!req)return null;
+        const cg=one(req.caregiver_profiles),facility=one(req.care_facilities),providerType=String(req.provider_type||(req.facility_id?"facility":"caregiver")) as "caregiver"|"facility",isFamily=String(req.family_user_id)===authUserId;
+        const partnerUserId=isFamily?String(providerType==="facility"?facility?.manager_user_id||"":cg?.user_id||""):String(req.family_user_id||"");
+        const partnerName=isFamily?String(providerType==="facility"?facility?.name||"Care facility":cg?.public_name||"Caregiver"):"Family · "+String(req.reference_code||"Care request");
+        return {id:String(convo.id),requestId:String(req.id),ref:String(req.reference_code||"Care request"),name:partnerName,partnerUserId,service:String(req.service||"Care request"),date:`${req.service_date} · ${String(req.start_time).slice(0,5)}–${String(req.end_time).slice(0,5)}`,status:String(req.status).replace(/_/g," "),amount:Number(req.budget_amount||0),providerType};
+      }).filter(Boolean) as Array<{id:string;requestId:string;ref:string;name:string;partnerUserId:string;service:string;date:string;status:string;amount:number;providerType:"caregiver"|"facility"}>;
+      setConversationList(mapped);setActiveConversationId((current)=>mapped.some((x)=>x.id===current)?current:(mapped[0]?.id||""));setConversationLoading(false);
+    })();
+    return()=>{active=false;};
+  },[path,authUserId,signedIn,userRoles.join(",")]);
+
+  useEffect(() => {
+    const client=supabase;
+    if(!client||!authUserId||!activeConversationId||!["/app/messages","/caregiver/messages","/facility/messages"].includes(path)){setConversationMessages([]);return;}
+    let active=true;
+    const load=async(initial=false)=>{
+      if(initial)setConversationLoading(true);
+      const {data,error}=await client.from("messages").select("id,sender_user_id,body,ciphertext,iv,created_at").eq("conversation_id",activeConversationId).order("created_at",{ascending:true});
+      if(!active)return;
+      if(error){console.error("Unable to load conversation messages:",error.message);setConversationMessages([]);setConversationLoading(false);return;}
+      const decoded=await Promise.all((data||[]).map(async(row:any)=>{
+        if(row.ciphertext&&row.iv){try{return {id:String(row.id),sender_user_id:String(row.sender_user_id),body:await decryptMessage(client,authUserId,String(row.sender_user_id),String(row.ciphertext),String(row.iv)),created_at:String(row.created_at),encrypted:true};}catch{return {id:String(row.id),sender_user_id:String(row.sender_user_id),body:"Encrypted message unavailable on this device.",created_at:String(row.created_at),encrypted:true};}}
+        return {id:String(row.id),sender_user_id:String(row.sender_user_id),body:row.body?String(row.body)+" (legacy message; sent before client-side encryption)":"This legacy message cannot be displayed securely.",created_at:String(row.created_at),encrypted:false};
+      }));
+      if(active){setConversationMessages(decoded);setConversationLoading(false);}
+    };
+    void load(true);const timer=window.setInterval(()=>void load(false),3500);
+    return()=>{active=false;window.clearInterval(timer);};
+  },[activeConversationId,authUserId,path]);
 
   useEffect(() => {
     if (!["/caregiver", "/caregiver/profile"].includes(path) || !supabase || !authUserId || !userRoles.includes("caregiver")) {
