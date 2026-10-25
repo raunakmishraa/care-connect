@@ -352,11 +352,11 @@ function App() {
     const facilityView=userRoles.includes("facility_manager")&&(path==="/facility/requests"||path==="/facility");
     if(!familyView&&!caregiverView&&!facilityView)return;
     let active=true;
-    void(async()=>{
-      let query=supabase.from("care_requests").select("id,reference_code,family_user_id,provider_type,caregiver_profile_id,facility_id,recipient_name,service,service_date,start_time,end_time,service_area,tasks,notes,budget_amount,status,caregiver_profiles!care_requests_caregiver_profile_id_fkey(public_name,user_id),care_facilities!care_requests_facility_id_fkey(name,manager_user_id)").order("created_at",{ascending:false});
+    const load=async()=>{
+      let query=supabase!.from("care_requests").select("id,reference_code,family_user_id,provider_type,caregiver_profile_id,facility_id,recipient_name,service,service_date,start_time,end_time,service_area,tasks,notes,budget_amount,status,caregiver_profiles!care_requests_caregiver_profile_id_fkey(public_name,user_id),care_facilities!care_requests_facility_id_fkey(name,manager_user_id)").order("created_at",{ascending:false});
       if(familyView)query=query.eq("family_user_id",authUserId);
       const {data,error}=await query;if(!active)return;
-      if(error){notify("Couldn't load requests: "+error.message);setRequests([]);return;}
+      if(error){console.error("Couldn't load requests:",error.message);return;}
       const one=(v:any)=>Array.isArray(v)?v[0]:v;
       setRequests((data||[]).filter((row:any)=>{
         const type=String(row.provider_type||(row.facility_id?"facility":"caregiver")),cg=one(row.caregiver_profiles),facility=one(row.care_facilities);
@@ -365,8 +365,10 @@ function App() {
         const cg=one(row.caregiver_profiles),facility=one(row.care_facilities),providerType=String(row.provider_type||(row.facility_id?"facility":"caregiver")) as "caregiver"|"facility";
         return {id:String(row.id),ref:String(row.reference_code||"Care request"),name:String(providerType==="facility"?facility?.name||"Care facility":cg?.public_name||"Caregiver"),service:String(row.service||"Care request"),date:`${row.service_date} · ${String(row.start_time).slice(0,5)}–${String(row.end_time).slice(0,5)}`,status:String(row.status).replace(/_/g," "),amount:Number(row.budget_amount||0),caregiverProfileId:String(row.caregiver_profile_id||""),facilityId:row.facility_id?String(row.facility_id):null,providerType,providerUserId:String(providerType==="facility"?facility?.manager_user_id||"":cg?.user_id||""),familyUserId:String(row.family_user_id),recipient:String(row.recipient_name||"Care recipient"),area:String(row.service_area||""),tasks:String(row.tasks||""),notes:String(row.notes||""),start:String(row.start_time||"09:00").slice(0,5),end:String(row.end_time||"12:00").slice(0,5)};
       }));
-    })();
-    return()=>{active=false;};
+    };
+    void load();
+    const timer=window.setInterval(()=>void load(),5000);
+    return()=>{active=false;window.clearInterval(timer);};
   },[path,authUserId,signedIn,userRoles.join(",")]);
 
   useEffect(() => {
