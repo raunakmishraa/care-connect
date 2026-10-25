@@ -56,6 +56,7 @@ import {
   LogOut,
 } from "lucide-react";
 import { formatNPR, supabase } from "./lib";
+import { decryptMessage, encryptMessage, ensureMessageIdentity } from "./lib/secure-messages";
 import ProviderApplication from "./ProviderApplication";
 import SupportChatbot from "./SupportChatbot";
 
@@ -126,6 +127,9 @@ type Caregiver = {
 };
 const EMPTY_CAREGIVERS: Caregiver[] = [];
 type FacilityListing = {
+  id: string;
+  managerUserId: string;
+  monthlyFee: number;
   name: string;
   area: string;
   type: string;
@@ -275,14 +279,20 @@ function App() {
     budget: "",
     notes: "",
   });
-  const [requests, setRequests] = useState<Array<{id:string;ref:string;name:string;service:string;date:string;status:string;amount:number;caregiverProfileId:string;familyUserId:string;recipient:string;area:string;tasks:string;notes:string;start:string;end:string}>>([]);
+  const [requests, setRequests] = useState<Array<{id:string;ref:string;name:string;service:string;date:string;status:string;amount:number;caregiverProfileId:string;facilityId:string|null;providerType:"caregiver"|"facility";providerUserId:string;familyUserId:string;recipient:string;area:string;tasks:string;notes:string;start:string;end:string}>>([]);
   const [recipients, setRecipients] = useState<string[]>([]);
   const [requestBusy, setRequestBusy] = useState(false);
   const [clarificationFor, setClarificationFor] = useState<string | null>(null);
-  const [requestMessages, setRequestMessages] = useState<Record<string, Array<{message:string;sender_user_id:string;created_at:string}>>>({});
+  const [requestMessages, setRequestMessages] = useState<Record<string, Array<{message:string;sender_user_id:string;created_at:string;encrypted?:boolean}>>>({});
+  const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
+  const [facilityListings, setFacilityListings] = useState<FacilityListing[]>([]);
+  const [conversationList, setConversationList] = useState<Array<{id:string;requestId:string;ref:string;name:string;partnerUserId:string;service:string;date:string;status:string;amount:number;providerType:"caregiver"|"facility"}>>([]);
+  const [activeConversationId, setActiveConversationId] = useState<string>("");
+  const [conversationMessages, setConversationMessages] = useState<Array<{id:string;sender_user_id:string;body:string;created_at:string;encrypted:boolean}>>([]);
+  const [conversationLoading, setConversationLoading] = useState(false);
   const [newRecipient, setNewRecipient] = useState("");
   const [message, setMessage] = useState("");
-  const [messages, setMessages] = useState<Array<{from:string;text:string;time:string}>>([]);
+
   const [facilityEnquiries, setFacilityEnquiries] = useState<string[]>([]);
   const [incidentType, setIncidentType] = useState("Safety concern");
   const [incidentText, setIncidentText] = useState("");
@@ -1101,7 +1111,7 @@ function App() {
         ),
     [caregivers, searchText, serviceFilter, sort],
   );
-  const requestCare = (c: Caregiver) => {
+  const requestCare = (c: Caregiver | FacilityListing) => {
     if (!signedIn) {
       openAuth("signin");
       notify("Sign in to continue your care request.");
@@ -1111,21 +1121,74 @@ function App() {
       notify("Only an account with the assigned family role can request care.");
       return;
     }
+    const isFacility = "managerUserId" in c;
     setSelected(c);
+    setRequest((current) => ({ ...current, area: c.area || current.area, service: isFacility ? "Residential care placement" : current.service, budget: isFacility && c.monthlyFee ? String(c.monthlyFee) : current.budget }));
     setStep(1);
     setModal("request");
   };
   const submitRequest = async () => {
-    if(!supabase||!authUserId||!userRoles.includes("family")){notify("Sign in with a family account to submit a care request.");return;}
-    const caregiver=selected as Caregiver|null;
-    if(!caregiver?.id||!request.recipient||!request.date||!request.area.trim()){notify("Choose a recipient, date and service location.");return;}
+    const client=supabase;
+    if(!client||!authUserId||!userRoles.includes("family")){notify("Sign in with a family account to submit a care request.");return;}
+    const target=selected as Caregiver|FacilityListing|null;
+    const isFacility=!!target&&"managerUserId" in target;
+    if(!target?.id||!request.recipient||!request.date||!request.area.trim()){notify("Choose a recipient, date and service location.");return;}
     if(request.end<=request.start){notify("End time must be later than start time.");return;}
     setRequestBusy(true);
-    const ref="AC-"+new Date().getFullYear().toString().slice(-2)+(new Date().getMonth()+1).toString().padStart(2,"0")+"-"+Math.floor(1000+Math.random()*8999);
-    const mins=(Number(request.end.split(":")[0])*60+Number(request.end.split(":")[1]||0))-(Number(request.start.split(":")[0])*60+Number(request.start.split(":")[1]||0));
-    const {data,error}=await supabase.from("care_requests").insert({reference_code:ref,family_user_id:authUserId,caregiver_profile_id:caregiver.id,recipient_name:request.recipient,service:request.service||"Daily living support",service_date:request.date,start_time:request.start,end_time:request.end,service_area:request.area.trim(),tasks:request.tasks.trim(),notes:request.notes.trim(),budget_amount:Number(request.budget||0)*Math.max(1,mins/60),status:"pending_response"}).select("id").single();
-    setRequestBusy(false);if(error||!data){notify("Request wasn't saved: "+(error?.message||"Try again."));return;}
-    setModal(null);setStep(1);setRequest({recipient:"",service:"",date:"",start:"09:00",end:"12:00",area:"",tasks:"",budget:"",notes:""});go("/app/requests");notify(`Request ${ref} submitted and saved. It is not a confirmed booking.`);
+    const now=new Date(), ref="AC-"+now.getFullYear().toString().slice(-2)+(now.getMonth()+1).toString().padStart(2,"0")+"-"+Math.floor(1000+Math.random()*8999);
+    const minutes=(Number(request.end.split(":")[0])*60+Number(request.end.split(":")[1]||0))-(Number(request.start.split(":")[0])*60+Number(request.start.split(":")[1]||0));
+    const payload={reference_code:ref,family_user_id:authUserId,provider_type:isFacility?"facility":"caregiver",caregiver_profile_id:isFacility?null:target.id,facility_id:isFacility?target.id:null,recipient_name:request.recipient,service:request.service||(isFacility?"Residential care placement":"Daily living support"),service_date:request.date,start_time:request.start,end_time:request.end,service_area:request.area.trim(),tasks:request.tasks.trim(),notes:request.notes.trim(),budget_amount:Number(request.budget||0)*(isFacility?1:Math.max(1,minutes/60)),status:"pending_response"};
+    const {data,error}=await client.from("care_requests").insert(payload).select("id").single();
+    setRequestBusy(false);
+    if(error||!data){notify("Request wasn't saved: "+(error?.message||"Try again."));return;}
+    setModal(null);setStep(1);setRequest({recipient:"",service:"",date:"",start:"09:00",end:"12:00",area:"",tasks:"",budget:"",notes:""});
+    go("/app/requests");notify(`Request ${ref} submitted and saved. The provider can respond before a booking is confirmed.`);
+  };
+
+  const acceptCareRequest = async (item:(typeof requests)[number]) => {
+    const client=supabase;
+    if(!client||!authUserId||!(userRoles.includes("caregiver")||userRoles.includes("facility_manager"))){notify("Sign in with the assigned provider account to respond.");return;}
+    setRequestBusy(true);const {data,error}=await client.rpc("care_request_accept",{p_request_id:item.id});setRequestBusy(false);
+    if(error||!data){notify("Request could not be accepted: "+(error?.message||"Please refresh and try again."));return;}
+    setRequests(current=>current.map(x=>x.id===item.id?{...x,status:"accepted pending terms"}:x));
+    notify("Request accepted. The family has been notified and a private conversation is available. Confirm only after reviewing the details together.");
+    if(path.endsWith("/messages"))setActiveConversationId(String(data));
+  };
+
+  const confirmCareRequest = async (item:(typeof requests)[number]) => {
+    const client=supabase;
+    if(!client||!authUserId||!userRoles.includes("family")){notify("Sign in with the requesting family account to confirm this booking.");return;}
+    setRequestBusy(true);const {data,error}=await client.rpc("care_request_confirm",{p_request_id:item.id});setRequestBusy(false);
+    if(error||data!==true){notify("Booking could not be confirmed: "+(error?.message||"Review the request status and try again."));return;}
+    setRequests(current=>current.map(x=>x.id===item.id?{...x,status:"confirmed"}:x));notify("Booking confirmed. Both parties can continue coordinating in Messages.");
+  };
+
+  const sendRequestMessage = async (item:(typeof requests)[number]) => {
+    const client=supabase,draft=(replyDrafts[item.id]||"").trim();
+    if(!client||!authUserId||!draft)return;
+    if(!item.providerUserId){notify("The assigned provider account could not be found.");return;}
+    setRequestBusy(true);
+    try {
+      const encrypted=await encryptMessage(client,authUserId,item.providerUserId,draft);
+      const {error}=await client.from("care_request_messages").insert({request_id:item.id,sender_user_id:authUserId,message:null,ciphertext:encrypted.ciphertext,iv:encrypted.iv});
+      if(error)throw new Error(error.message);
+      setRequestMessages(current=>({...current,[item.id]:[...(current[item.id]||[]),{message:draft,sender_user_id:authUserId,created_at:new Date().toISOString(),encrypted:true}]}));
+      setReplyDrafts(current=>({...current,[item.id]:""}));notify("Encrypted reply sent to the provider.");
+    } catch(error){notify(error instanceof Error?error.message:"The secure message could not be sent.");}
+    finally{setRequestBusy(false);}
+  };
+
+  const sendChatMessage = async (event:import("react").FormEvent<HTMLFormElement>) => {
+    event.preventDefault();const client=supabase,active=conversationList.find(c=>c.id===activeConversationId),draft=message.trim();
+    if(!client||!authUserId||!active||!draft)return;
+    if(!active.partnerUserId){notify("The other party's account could not be identified.");return;}
+    setRequestBusy(true);
+    try {
+      const encrypted=await encryptMessage(client,authUserId,active.partnerUserId,draft);
+      const {error}=await client.from("messages").insert({conversation_id:active.id,sender_user_id:authUserId,body:null,ciphertext:encrypted.ciphertext,iv:encrypted.iv});
+      if(error)throw new Error(error.message);setMessage("");notify("Encrypted message sent.");
+    } catch(error){notify(error instanceof Error?error.message:"The secure message could not be sent.");}
+    finally{setRequestBusy(false);}
   };
   const publicNav = [
     ["/", t.home],
