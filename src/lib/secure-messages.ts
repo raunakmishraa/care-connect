@@ -67,10 +67,16 @@ export async function ensureMessageIdentity(
       true,
       ["deriveKey"],
     ) as CryptoKeyPair;
-    identity = {
-      privateKey: pair.privateKey,
-      publicJwk: await crypto.subtle.exportKey("jwk", pair.publicKey),
-    };
+    const publicJwk = await crypto.subtle.exportKey("jwk", pair.publicKey);
+    const privatePkcs8 = await crypto.subtle.exportKey("pkcs8", pair.privateKey);
+    const nonExtractablePrivateKey = await crypto.subtle.importKey(
+      "pkcs8",
+      privatePkcs8,
+      { name: "ECDH", namedCurve: "P-256" },
+      false,
+      ["deriveKey"],
+    );
+    identity = { privateKey: nonExtractablePrivateKey, publicJwk };
     await writeIdentity(userId, identity);
   }
   if (!publishedIdentities.has(userId)) {
