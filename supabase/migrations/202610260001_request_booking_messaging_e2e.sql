@@ -92,6 +92,16 @@ alter table public.care_request_messages add constraint care_request_messages_en
   (ciphertext is not null and iv is not null and message is null)
 );
 
+-- Families can submit enquiries only against a published, approved facility.
+drop policy if exists "Family creates facility enquiries" on public.facility_enquiries;
+create policy "Family creates facility enquiries" on public.facility_enquiries
+  for insert to authenticated with check (
+    family_user_id=auth.uid()
+    and exists(select 1 from public.user_roles ur where ur.user_id=auth.uid() and ur.role::text='family')
+    and exists(select 1 from public.care_facilities f where f.id=facility_id and f.verification_status::text='approved' and f.is_published=true)
+  );
+grant select,insert on public.facility_enquiries to authenticated;
+
 -- Use a SECURITY DEFINER membership predicate to avoid recursive or overly broad
 -- row-level-security checks on conversation participants.
 create or replace function public.is_conversation_participant(p_conversation_id uuid, p_user_id uuid)
