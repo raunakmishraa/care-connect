@@ -61,7 +61,7 @@ begin
    execute 'update public.care_requests set service_area=location_area where service_area is null';
  end if;
  if exists(select 1 from information_schema.columns where table_schema='public' and table_name='care_requests' and column_name='family_message') then
-   execute 'update public.care_requests set notes=coalesce(family_message, '''') where notes is null or notes=''''';
+   execute format('update public.care_requests set notes=coalesce(family_message, %L) where notes is null or notes=%L', '', '');
  end if;
  if exists(select 1 from information_schema.columns where table_schema='public' and table_name='care_requests' and column_name='rate_amount') then
    execute 'update public.care_requests set budget_amount=coalesce(rate_amount, 0) where budget_amount=0';
@@ -96,6 +96,7 @@ alter table public.care_requests alter column status type text using status::tex
 alter table public.care_requests alter column status set default 'pending_response';
 alter table public.care_requests alter column status set not null;
 
+create unique index if not exists care_requests_reference_code_uidx on public.care_requests(reference_code) where reference_code is not null;
 create index if not exists care_requests_family_created_idx on public.care_requests(family_user_id,created_at desc);
 create index if not exists care_requests_caregiver_created_idx on public.care_requests(caregiver_profile_id,created_at desc);
 create table if not exists public.care_request_messages (
