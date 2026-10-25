@@ -1508,6 +1508,8 @@ function App() {
                     ? [
                         ["/facility", LayoutDashboard, "Overview"],
                         ["/facility/listing", House, "Facility listing"],
+                        ["/facility/requests", ClipboardList, "Care requests"],
+                        ["/facility/messages", MessageCircle, "Messages"],
                         ["/facility/enquiries", MessageCircle, "Enquiries"],
                       ]
                     : [
@@ -1623,25 +1625,14 @@ function App() {
             />
           )}
           {path === "/care-homes" && (
-            <CareHomeDirectory
-              onOpen={(f) => {
-                setSelected(f);
-                go("/care-homes/" + f.name.toLowerCase().replaceAll(" ", "-"));
-              }}
-            />
+            <CareHomeDirectory facilities={facilityListings} onOpen={(f: FacilityListing) => { setSelected(f); go("/care-homes/" + f.id); }} />
           )}
           {path.startsWith("/care-homes/") && (
             <FacilityDetail
-              facility={
-                facilities.find((f) =>
-                  path.includes(f.name.toLowerCase().replaceAll(" ", "-")),
-                ) || facilities[0]
-              }
+              facility={facilityListings.find((f) => path.endsWith(f.id) || path.includes(f.name.toLowerCase().replaceAll(" ", "-"))) || facilityListings[0]}
               onBack={() => go("/care-homes")}
-              onEnquire={(f) => {
-                setSelected(f);
-                setModal("enquiry");
-              }}
+              onRequest={(f: FacilityListing) => requestCare(f)}
+              onEnquire={(f: FacilityListing) => { setSelected(f); setModal("enquiry"); }}
             />
           )}
           {path === "/how-it-works" && (
@@ -1965,7 +1956,8 @@ function App() {
               request={request}
               setRequest={setRequest}
               recipientOptions={recipients}
-              caregiver={(selected as Caregiver | null) || caregivers[0]}
+              caregiver={selected}
+              providerType={selected && "managerUserId" in selected ? "facility" : "caregiver"}
               onSubmit={submitRequest}
               onClose={() => setModal(null)}
             />
@@ -2059,7 +2051,7 @@ function App() {
           )}
         </Modal>
       )}
-      {clarificationFor && <Modal title="Ask the family for details" onClose={()=>setClarificationFor(null)}><div className="modal-form"><p className="muted">Your question will be saved with this request and shown to the family.</p><label>Question<textarea id="clarification-message" rows={4} maxLength={1500}/></label><button className="button button-primary full" disabled={requestBusy} onClick={()=>void(async()=>{const msg=(document.getElementById("clarification-message") as HTMLTextAreaElement|null)?.value.trim()||"";const item=requests.find(x=>x.id===clarificationFor);if(!msg||!item||!supabase||!authUserId){notify("Enter a question before sending.");return;}setRequestBusy(true);const {error}=await supabase.from("care_request_messages").insert({request_id:item.id,sender_user_id:authUserId,message:msg});if(!error&&item.status==="pending response")await supabase.from("care_requests").update({status:"clarification_requested"}).eq("id",item.id).eq("caregiver_profile_id",item.caregiverProfileId).eq("status","pending_response");setRequestBusy(false);if(error){notify("Question wasn't saved: "+error.message);return;}setRequests(xs=>xs.map(x=>x.id===item.id?{...x,status:"clarification requested"}:x));setClarificationFor(null);notify("Question sent to the family.");})()}>Send question <Send size={16}/></button></div></Modal>}
+      {clarificationFor && <Modal title="Ask the family for details" onClose={()=>setClarificationFor(null)}><div className="modal-form"><p className="muted">Your question is encrypted on this device before it is saved.</p><label>Question<textarea id="clarification-message" rows={4} maxLength={1500}/></label><button className="button button-primary full" disabled={requestBusy} onClick={()=>void(async()=>{const msg=(document.getElementById("clarification-message") as HTMLTextAreaElement|null)?.value.trim()||"";const item=requests.find(x=>x.id===clarificationFor);const client=supabase;if(!msg||!item||!client||!authUserId){notify("Enter a question before sending.");return;}setRequestBusy(true);try{const encrypted=await encryptMessage(client,authUserId,item.familyUserId,msg);const {error}=await client.from("care_request_messages").insert({request_id:item.id,sender_user_id:authUserId,message:null,ciphertext:encrypted.ciphertext,iv:encrypted.iv});if(error)throw new Error(error.message);if(item.status==="pending response"){const {error:statusError}=await client.from("care_requests").update({status:"clarification_requested"}).eq("id",item.id).eq("status","pending_response");if(statusError)throw new Error(statusError.message);}setRequests(xs=>xs.map(x=>x.id===item.id?{...x,status:"clarification requested"}:x));setRequestMessages(xs=>({...xs,[item.id]:[...(xs[item.id]||[]),{message:msg,sender_user_id:authUserId,created_at:new Date().toISOString(),encrypted:true}]}));setClarificationFor(null);notify("Encrypted question sent to the family.");}catch(error){notify(error instanceof Error?error.message:"The question could not be sent securely.");}finally{setRequestBusy(false);}})()}>Send question <Send size={16}/></button></div></Modal>}
       {toast && (
         <div className="toast" role="status">
           <CheckCircle2 size={18} />
@@ -2175,10 +2167,10 @@ function App() {
       const visible = requests.filter(
         (r) =>
           activeTab === "All" ||
-          (activeTab === "Requests" && r.status !== "Confirmed") ||
-          (activeTab === "Upcoming" && r.status === "Confirmed") ||
-          (activeTab === "Past" && r.status === "Completed") ||
-          (activeTab === "Cancelled" && r.status === "Cancelled"),
+          (activeTab === "Requests" && r.status !== "confirmed") ||
+          (activeTab === "Upcoming" && r.status === "confirmed") ||
+          (activeTab === "Past" && r.status === "completed") ||
+          (activeTab === "Cancelled" && r.status === "cancelled"),
       );
       return (
         <>
@@ -2216,7 +2208,8 @@ function App() {
                   <span className="eyebrow">{r.ref}</span>
                   <h3>{r.name}</h3>
                   <p>{r.service}</p>
-                  {requestMessages[r.id]?.map((entry,index)=><div className="inline-note" key={entry.created_at+index}><MessageCircle size={15}/>{entry.sender_user_id===authUserId?" Your message: ":" Caregiver asks: "}{entry.message}</div>)}
+                  {requestMessages[r.id]?.map((entry,index)=><div className="inline-note" key={entry.created_at+index}><MessageCircle size={15}/>{entry.sender_user_id===authUserId?" You: ":r.providerType==="facility"?" Facility: ":" Caregiver: "}{entry.message}{!entry.encrypted&&<small> · legacy message</small>}</div>)}
+                  {(r.status === "clarification requested" || r.status === "accepted pending terms" || r.status === "confirmed") && <div className="request-reply"><label htmlFor={"reply-"+r.id}>Reply to {r.providerType === "facility" ? "facility" : "caregiver"}</label><textarea id={"reply-"+r.id} rows={2} maxLength={1500} value={replyDrafts[r.id]||""} onChange={(event)=>setReplyDrafts(current=>({...current,[r.id]:event.target.value}))} placeholder="Write a reply…"/><button className="button button-secondary small" disabled={requestBusy||!(replyDrafts[r.id]||"").trim()} onClick={()=>void sendRequestMessage(r)}>Send encrypted reply <Send size={14}/></button></div>}
                   <div className="request-meta">
                     <span>
                       <CalendarDays size={14} />
@@ -2232,17 +2225,9 @@ function App() {
                   <StatusPill status={r.status} />
                   <strong>{formatNPR(r.amount)}</strong>
                   <span className="muted tiny">Estimate · not a payment</span>
-                  <button
-                    className="text-link"
-                    onClick={() => {
-                      setSelected(
-                        caregivers.find((c) => c.name === r.name) ||
-                          caregivers[0],
-                      );
-                      go("/app/messages");
-                    }}
-                  >
-                    View details <ArrowRight size={14} />
+                  {r.status === "accepted pending terms" && <button className="button button-primary small" disabled={requestBusy} onClick={()=>void confirmCareRequest(r)}>Confirm booking <CheckCircle2 size={14}/></button>}
+                  <button className="text-link" onClick={() => { const chat = conversationList.find((conversation) => conversation.requestId === r.id); if (chat) { setActiveConversationId(chat.id); go("/app/messages"); } else notify("Messaging opens once the provider accepts this request."); }}>
+                    {["accepted pending terms","confirmed","completed"].includes(r.status) ? "Open conversation" : "View request"} <ArrowRight size={14} />
                   </button>
                 </div>
               </div>
@@ -2351,113 +2336,32 @@ function App() {
         </>
       );
     }
-    if (path === "/app/messages" || path === "/caregiver/messages") {
-      return (
-        <>
-          <PageHeader
-            eyebrow="COMMUNICATION"
-            title="Messages"
-            subtitle="Keep care conversations together, with their booking context."
-          />
-          <div className="messages-layout">
-            <aside className="conversation-list">
-              <button className="conversation active">
-                <div className="mini-avatar rose">MS</div>
-                <span>
-                  <b>{authFullName || profileName || authEmail || "No conversation selected"}</b>
-                  <small>Care request · Daily living</small>
-                  <small className="muted">Today, 10:42 AM</small>
-                </span>
-                <span className="unread-dot" />
-              </button>
-              <button className="conversation">
-                <div className="mini-avatar blue">HC</div>
-                <span>
-                  <b>No facility selected</b>
-                  <small>Facility enquiry</small>
-                  <small className="muted">Yesterday</small>
-                </span>
-              </button>
-            </aside>
-            <section className="chat-panel">
-              <div className="chat-head">
-                <div className="mini-avatar rose">MS</div>
-                <div>
-                  <b>Maya Shrestha</b>
-                  <small>
-                    <span className="online-dot" /> No linked request
-                  </small>
-                </div>
-                <button
-                  className="icon-button"
-                  onClick={() => setModal("incident")}
-                  aria-label="Report concern"
-                >
-                  <Shield size={18} />
-                </button>
-              </div>
-              <div className="chat-context">
-                <CalendarDays size={16} />
-                <span>
-                  <b>Daily living support</b>
-                  <small>Fri, 16 Oct · 9:00–12:00 · Request pending</small>
-                </span>
-                <button onClick={() => go("/app/requests")}>
-                  View request <ArrowRight size={13} />
-                </button>
-              </div>
-              <div className="chat-body">
-                {messages.map((m, i) => (
-                  <div
-                    className={
-                      m.from === "You"
-                        ? "message-bubble sent"
-                        : "message-bubble"
-                    }
-                    key={i}
-                  >
-                    <small>
-                      {m.from} · {m.time}
-                    </small>
-                    <p>{m.text}</p>
-                  </div>
-                ))}
-              </div>
-              <form
-                className="chat-compose"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  if (message.trim()) {
-                    setMessages((m) => [
-                      ...m,
-                      { from: "You", text: message.trim(), time: "Just now" },
-                    ]);
-                    setMessage("");
-                    notify("Message added to local demo only.");
-                  }
-                }}
-              >
-                <input
-                  value={message}
-                  onChange={(e) => setMessage(e.target.value)}
-                  placeholder="Write a message…"
-                  aria-label="Write a message"
-                />
-                <button
-                  className="button button-primary"
-                  aria-label="Send message"
-                >
-                  <Send size={17} />
-                </button>
-              </form>
-              <p className="fineprint">
-                Messages are prototype content. Attachments are disabled in the
-                launch scope.
-              </p>
-            </section>
-          </div>
-        </>
-      );
+    if (path === "/app/messages" || path === "/caregiver/messages" || path === "/facility/messages") {
+      const activeConversation = conversationList.find((conversation) => conversation.id === activeConversationId) || null;
+      return <>
+        <PageHeader eyebrow="COMMUNICATION" title="Messages" subtitle="Real conversations linked to care requests accepted by the provider."/>
+        <div className="messages-layout">
+          <aside className="conversation-list">
+            {conversationLoading&&conversationList.length===0&&<p className="muted" style={{padding:16}}>Loading conversations…</p>}
+            {conversationList.map((conversation)=><button key={conversation.id} className={conversation.id===activeConversationId?"conversation active":"conversation"} onClick={()=>setActiveConversationId(conversation.id)}>
+              <div className="mini-avatar blue">{conversation.name.split(/\s+/).slice(0,2).map((word)=>word[0]||"").join("").toUpperCase()}</div>
+              <span><b>{conversation.name}</b><small>{conversation.ref} · {conversation.service}</small><small className="muted">{conversation.status}</small></span>
+            </button>)}
+            {!conversationLoading&&conversationList.length===0&&<div className="empty-inline" style={{padding:18}}>No conversations yet. Chats appear after a caregiver or facility accepts a care request.</div>}
+          </aside>
+          {activeConversation ? <section className="chat-panel">
+            <div className="chat-head"><div className="mini-avatar blue">{activeConversation.name.split(/\s+/).slice(0,2).map((word)=>word[0]||"").join("").toUpperCase()}</div><div><b>{activeConversation.name}</b><small><span className="online-dot"/> {activeConversation.ref} · {activeConversation.status}</small></div><button className="button button-secondary small" onClick={()=>go(userRoles.includes("family")?"/app/requests":userRoles.includes("facility_manager")?"/facility/requests":"/caregiver/requests")}>View request</button></div>
+            <div className="chat-context"><CalendarDays size={16}/><span><b>{activeConversation.service}</b><small>{activeConversation.date} · {formatNPR(activeConversation.amount)} indicative</small></span>{userRoles.includes("family")&&activeConversation.status==="accepted pending terms"&&<button onClick={()=>{const item=requests.find((row)=>row.id===activeConversation.requestId);if(item)void confirmCareRequest(item);else notify("Open Requests & bookings to confirm this request.");}}>Confirm booking <ArrowRight size={13}/></button>}</div>
+            <div className="chat-body">
+              {conversationLoading&&conversationMessages.length===0&&<p className="muted">Loading messages…</p>}
+              {conversationMessages.map((m)=><div className={m.sender_user_id===authUserId?"message-bubble sent":"message-bubble"} key={m.id}><small>{m.sender_user_id===authUserId?"You":activeConversation.name} · {new Date(m.created_at).toLocaleString()}</small><p>{m.body}</p></div>)}
+              {!conversationLoading&&conversationMessages.length===0&&<div className="empty-inline">Conversation opened. Discuss any changes to care, dates, availability or terms here.</div>}
+            </div>
+            <form className="chat-compose" onSubmit={sendChatMessage}><input value={message} onChange={(event)=>setMessage(event.target.value)} placeholder="Write a secure message…" aria-label="Write a message" maxLength={5000}/><button className="button button-primary" aria-label="Send message" disabled={requestBusy||!message.trim()}><Send size={17}/></button></form>
+            <p className="fineprint">New messages are encrypted in this browser before storage. Your private key stays in this browser profile; clearing its site data or switching devices may make existing encrypted messages unreadable. Older pre-migration messages, if any, are marked as legacy.</p>
+          </section> : <section className="chat-panel"><EmptyState icon={<MessageCircle/>} title="No conversation selected" text="A conversation will appear here after a provider accepts a request." action="View requests" onClick={()=>go(userRoles.includes("family")?"/app/requests":userRoles.includes("facility_manager")?"/facility/requests":"/caregiver/requests")}/></section>}
+        </div>
+      </>;
     }
     if (path === "/app/enquiries") {
       return (
@@ -2501,62 +2405,26 @@ function App() {
         </>
       );
     }
-    if (path === "/caregiver/requests") {
-      return (
-        <>
-          <PageHeader
-            eyebrow="CAREGIVER SPACE"
-            title="Incoming requests"
-            subtitle="Review requested care and respond only when the details work for you."
-          />
-          <div className="notice-bar">
-            <ShieldCheck size={18} /> Accepting a request creates a pending
-            booking. Confirm only after terms are agreed.
-          </div>
-          {requests.map((r) => (
-            <div className="request-row" key={r.ref}>
-              <div className="request-icon">
-                <ClipboardList />
-              </div>
-              <div className="request-info">
-                <span className="eyebrow">{r.ref}</span>
-                <h3>Family request · {r.service}</h3>
-                <p>{r.date}</p>
-                <p className="muted">
-                  Approximate area: Lalitpur · Tasks: morning routine and light
-                  meal
-                </p>
-              </div>
-              <div className="request-side">
-                <StatusPill status={r.status} />
-                <strong>{formatNPR(r.amount)}</strong>
-                <div className="button-row">
-                  <button
-                    className="button button-secondary small"
-                    onClick={() => setClarificationFor(r.id)}
-                  >
-                    Ask details
-                  </button>
-                  <button
-                    className="button button-primary small"
-                    disabled={requestBusy || r.status !== "pending response"}
-                    onClick={() => void(async()=>{
-                      if(!supabase||!authUserId)return;setRequestBusy(true);
-                      const {data:profile}=await supabase.from("caregiver_profiles").select("id").eq("user_id",authUserId).maybeSingle();
-                      if(!profile){setRequestBusy(false);notify("No caregiver profile is linked to this account.");return;}
-                      const {data,error}=await supabase.from("care_requests").update({status:"accepted_pending_terms",responded_at:new Date().toISOString()}).eq("id",r.id).eq("caregiver_profile_id",profile.id).eq("status","pending_response").select("id").maybeSingle();
-                      setRequestBusy(false);if(error||!data){notify("Request could not be accepted: "+(error?.message||"It may have changed already."));return;}
-                      setRequests(xs=>xs.map(x=>x.id===r.id?{...x,status:"accepted pending terms"}:x));notify("Request accepted. This is not a confirmed booking.");
-                    })()}
-                  >
-                    Accept
-                  </button>
-                </div>
-              </div>
+    if (path === "/caregiver/requests" || path === "/facility/requests") {
+      const facilityWorkspace=path==="/facility/requests";
+      return <>
+        <PageHeader eyebrow={facilityWorkspace?"FACILITY SPACE":"CAREGIVER SPACE"} title={facilityWorkspace?"Incoming care requests":"Incoming requests"} subtitle={facilityWorkspace?"Review family requests for your facility and respond as its authorized manager.":"Review requested care and respond only when the details work for you."}/>
+        <div className="notice-bar"><ShieldCheck size={18}/> Accepting a request opens a private encrypted conversation. A booking is confirmed only after the family reviews and confirms the requested terms.</div>
+        {requests.map((r)=><div className="request-row" key={r.id}>
+          <div className="request-icon">{facilityWorkspace?<House/>:<ClipboardList/>}</div>
+          <div className="request-info"><span className="eyebrow">{r.ref}</span><h3>{r.recipient} · {r.service}</h3><p>{r.date}</p><p className="muted">Requested by a family · {r.area} · {r.tasks||"No additional task details provided."}</p>{r.notes&&<p>{r.notes}</p>}</div>
+          <div className="request-side"><StatusPill status={r.status}/><strong>{formatNPR(r.amount)}{facilityWorkspace?" / month (indicative)":""}</strong>
+            <div className="button-row">
+              {["pending response","clarification requested"].includes(r.status)&&<button className="button button-secondary small" onClick={()=>setClarificationFor(r.id)} disabled={requestBusy}>Ask details</button>}
+              {["pending response","clarification requested"].includes(r.status)&&<button className="button button-primary small" disabled={requestBusy} onClick={()=>void acceptCareRequest(r)}>Accept request</button>}
+              {["accepted pending terms","confirmed","completed"].includes(r.status)&&<button className="button button-secondary small" onClick={()=>{const chat=conversationList.find((c)=>c.requestId===r.id);if(chat){setActiveConversationId(chat.id);go(facilityWorkspace?"/facility/messages":"/caregiver/messages");}else go(facilityWorkspace?"/facility/messages":"/caregiver/messages");}}>Open conversation <MessageCircle size={14}/></button>}
             </div>
-          ))}
-        </>
-      );
+            {r.status==="accepted pending terms"&&<p className="muted tiny">Accepted; waiting for the family to confirm.</p>}
+            {r.status==="confirmed"&&<p className="muted tiny">Booking confirmed by the family.</p>}
+          </div>
+        </div>)}
+        {requests.length===0&&<EmptyState icon={<ClipboardList/>} title="No incoming requests" text={facilityWorkspace?"Requests for your facility will appear here when families send them.":"New family requests will appear here when families request your services."} action="Open messages" onClick={()=>go(facilityWorkspace?"/facility/messages":"/caregiver/messages")}/>}
+      </>;
     }
     if (path === "/caregiver/schedule") {
       return (
@@ -4063,10 +3931,10 @@ function CaregiverProfile({
     </main>
   );
 }
-function CareHomeDirectory({ onOpen }: any) {
+function CareHomeDirectory({ onOpen, facilities: facilityRows }: any) {
   const [area, setArea] = useState("");
   const [type, setType] = useState("All facility types");
-  const list = facilities.filter(
+  const list = facilityRows.filter(
     (f) =>
       (!area ||
         `${f.name} ${f.area}`.toLowerCase().includes(area.toLowerCase())) &&
@@ -4188,7 +4056,7 @@ function CareHomeDirectory({ onOpen }: any) {
     </main>
   );
 }
-function FacilityDetail({ facility: f, onBack, onEnquire }: any) {
+function FacilityDetail({ facility: f, onBack, onEnquire, onRequest }: any) {
   return (
     <main className="page-container profile-page">
       <div className="breadcrumb">
@@ -4224,12 +4092,7 @@ function FacilityDetail({ facility: f, onBack, onEnquire }: any) {
             <b>{f.price}</b>
             <small>Availability {f.updated.toLowerCase()}</small>
           </div>
-          <button
-            className="button button-primary button-large"
-            onClick={() => onEnquire(f)}
-          >
-            Enquire about this facility <ArrowRight size={16} />
-          </button>
+          <div className="button-row"><button className="button button-primary button-large" onClick={() => onRequest(f)}>Request placement <ArrowRight size={16}/></button><button className="button button-secondary" onClick={() => onEnquire(f)}>Ask a question</button></div>
           <p className="fineprint">
             An enquiry is not a confirmed placement. Ask the facility to confirm
             current availability and terms.
@@ -4418,6 +4281,7 @@ function RequestWizard({
   setRequest,
   recipientOptions,
   caregiver,
+  providerType,
   onSubmit,
   onClose,
 }: any) {
@@ -4473,26 +4337,15 @@ function RequestWizard({
       )}
       {step === 2 && (
         <div className="wizard-content">
-          <h3>What support is needed?</h3>
+          <h3>{providerType === "facility" ? "What type of placement do you need?" : "What support is needed?"}</h3>
           <p className="muted">
             Choose a service and describe the tasks that matter. Avoid adding
             unnecessary sensitive details.
           </p>
           <label>
-            Type of support
-            <select
-              value={request.service}
-              onChange={(e) => set("service", e.target.value)}
-            >
-              {[
-                "Companionship",
-                "Daily living support",
-                "Mobility assistance",
-                "Light household support",
-                "Overnight care",
-              ].map((s) => (
-                <option key={s}>{s}</option>
-              ))}
+            {providerType === "facility" ? "Placement type" : "Type of support"}
+            <select value={request.service} onChange={(e) => set("service", e.target.value)}>
+              {(providerType === "facility" ? ["Residential care placement", "Assisted living placement", "Long-term care placement", "Short-term respite placement"] : ["Companionship", "Daily living support", "Mobility assistance", "Light household support", "Overnight care"]).map((service) => <option key={service}>{service}</option>)}
             </select>
           </label>
           <label>
