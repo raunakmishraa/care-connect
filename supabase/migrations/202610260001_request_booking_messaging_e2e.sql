@@ -260,7 +260,14 @@ begin
     (select r.id from public.care_recipients r where r.family_user_id=v_request.family_user_id and r.preferred_name=v_request.recipient_name order by r.created_at limit 1),
     (v_request.service_date + v_request.start_time) at time zone 'Asia/Kathmandu',
     (v_request.service_date + v_request.end_time) at time zone 'Asia/Kathmandu',
-    coalesce(v_request.budget_amount,0),
+    coalesce(
+      case when v_request.provider_type='facility' then v_request.budget_amount
+      else v_request.budget_amount / greatest(
+        extract(epoch from ((v_request.service_date + v_request.end_time) - (v_request.service_date + v_request.start_time))) / 3600,
+        1
+      ) end,
+      0
+    ),
     case when v_request.provider_type='facility' then 'month' else 'hour' end,
     coalesce(v_request.budget_amount,0), 'NPR', 'confirmed'
   ) on conflict (request_id) do update set status='confirmed', updated_at=now();
