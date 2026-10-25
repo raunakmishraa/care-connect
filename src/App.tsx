@@ -2855,6 +2855,26 @@ function App() {
             {" "}
             <button className="text-link" onClick={() => go("/caregiver/profile")}>Manage listing <ArrowRight size={14} /></button>
           </div>
+          {ownCaregiverStatus?.verificationStatus === "approved" && (
+            <div className="caregiver-self-service-actions caregiver-dashboard-status-actions">
+              <button
+                className="button button-secondary"
+                type="button"
+                disabled={caregiverStatusSaving}
+                onClick={() => void updateOwnCaregiverStatus({ acceptingRequests: !ownCaregiverStatus.acceptingRequests })}
+              >
+                {caregiverStatusSaving ? "Saving…" : ownCaregiverStatus.acceptingRequests ? "Pause new requests" : "Start accepting requests"}
+              </button>
+              <button
+                className="button button-primary"
+                type="button"
+                disabled={caregiverStatusSaving}
+                onClick={() => void updateOwnCaregiverStatus({ isPublished: !ownCaregiverStatus.isPublished })}
+              >
+                {caregiverStatusSaving ? "Saving…" : ownCaregiverStatus.isPublished ? "Hide from listing page" : "List my profile again"}
+              </button>
+            </div>
+          )}
           <div className="stats-grid">
             <Stat
               label="New requests"
