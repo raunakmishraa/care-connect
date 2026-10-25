@@ -2468,20 +2468,69 @@ function App() {
               <input defaultValue="Kathmandu Valley" />
             </label>
             <div className="inline-note">
-              <FileCheck2 size={17} /> Verification status: <b>Under review</b>.
-              Unapproved profiles are not published.
+              <FileCheck2 size={17} />
+              Verification status: <b>{ownCaregiverStatus?.verificationStatus.replace(/_/g, " ") || (caregiverStatusLoading ? "Loading…" : "Status unavailable")}</b>.
+              {ownCaregiverStatus?.verificationStatus === "approved"
+                ? " Your profile is approved; listing and request availability can be changed below."
+                : " Unapproved profiles are not published."}
             </div>
             <button
               className="button button-primary"
               onClick={() =>
                 notify(
-                  "Profile updates are unavailable until the profile service is configured.",
+                  "Public profile editing is not connected yet. Your account information can be edited from My profile.",
                 )
               }
             >
               Save profile
             </button>
           </div>
+          <section className="panel caregiver-self-service" style={{ maxWidth: 760, padding: 28, marginTop: 20 }}>
+            <PageHeader
+              eyebrow="LISTING CONTROLS"
+              title="Your public availability"
+              subtitle="Change whether families can find your profile and whether you are accepting requests. These settings do not change your approval status."
+            />
+            {caregiverStatusLoading ? (
+              <p className="muted">Loading your caregiver listing status…</p>
+            ) : !ownCaregiverStatus ? (
+              <p className="muted">We couldn't load your caregiver profile status. Refresh the page or contact support if this continues.</p>
+            ) : (
+              <>
+                <div className="caregiver-status-summary">
+                  <span>Verification status</span>
+                  <strong>{ownCaregiverStatus.verificationStatus.replace(/_/g, " ")}</strong>
+                  <span>Directory listing</span>
+                  <strong>{ownCaregiverStatus.isPublished ? "Visible to families" : "Hidden from families"}</strong>
+                  <span>Requests</span>
+                  <strong>{ownCaregiverStatus.acceptingRequests ? "Accepting requests" : "Not accepting requests"}</strong>
+                </div>
+                {ownCaregiverStatus.verificationStatus === "approved" ? (
+                  <div className="caregiver-self-service-actions">
+                    <button
+                      className="button button-secondary"
+                      type="button"
+                      disabled={caregiverStatusSaving}
+                      onClick={() => void updateOwnCaregiverStatus({ acceptingRequests: !ownCaregiverStatus.acceptingRequests })}
+                    >
+                      {caregiverStatusSaving ? "Saving…" : ownCaregiverStatus.acceptingRequests ? "Not accepting requests" : "Start accepting requests"}
+                    </button>
+                    <button
+                      className="button button-primary"
+                      type="button"
+                      disabled={caregiverStatusSaving}
+                      onClick={() => void updateOwnCaregiverStatus({ isPublished: !ownCaregiverStatus.isPublished })}
+                    >
+                      {caregiverStatusSaving ? "Saving…" : ownCaregiverStatus.isPublished ? "Hide from listing page" : "List my profile again"}
+                    </button>
+                  </div>
+                ) : (
+                  <p className="muted">Self-service controls become available after an administrator approves your profile. Changing these preferences later will not require another approval.</p>
+                )}
+                <p className="muted caregiver-status-note">You keep your approved status when you hide your profile or pause requests. You can turn either setting back on yourself when you return.</p>
+              </>
+            )}
+          </section>
         </>
       );
     }
