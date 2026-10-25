@@ -286,6 +286,10 @@ function App() {
   const [requestMessages, setRequestMessages] = useState<Record<string, Array<{message:string;sender_user_id:string;created_at:string;encrypted?:boolean}>>>({});
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
   const [facilityListings, setFacilityListings] = useState<FacilityListing[]>([]);
+  const [ownFacilityProfile, setOwnFacilityProfile] = useState<{id:string;verificationStatus:string;isPublished:boolean}|null>(null);
+  const [facilityDraft, setFacilityDraft] = useState({name:"",area:"",type:"Residential care",description:"",services:"",amenities:"",capacity:"",monthlyFee:"",availability:""});
+  const [facilitySaving, setFacilitySaving] = useState(false);
+  const [facilityEnquiryRows, setFacilityEnquiryRows] = useState<Array<{id:string;reference:string;familyUserId:string;facilityId:string;facilityName:string;question:string;status:string;createdAt:string}>>([]);
   const [conversationList, setConversationList] = useState<Array<{id:string;requestId:string;ref:string;name:string;partnerUserId:string;service:string;date:string;status:string;amount:number;providerType:"caregiver"|"facility"}>>([]);
   const [activeConversationId, setActiveConversationId] = useState<string>("");
   const [conversationMessages, setConversationMessages] = useState<Array<{id:string;sender_user_id:string;body:string;created_at:string;encrypted:boolean}>>([]);
@@ -386,6 +390,40 @@ function App() {
     return()=>{active=false;window.clearInterval(timer);};
   },[requests.map((r)=>r.id+":"+r.status).join(","),path,authUserId,signedIn,userRoles.join(",")]);
 
+
+  useEffect(() => {
+    const client=supabase;
+    if(!client||!authUserId||!signedIn||!userRoles.includes("facility_manager")||!(path==="/facility"||path==="/facility/listing")){setOwnFacilityProfile(null);return;}
+    let active=true;
+    void client.from("care_facilities").select("id,name,area,facility_type,description,services,amenities,capacity,indicative_monthly_fee,availability_note,verification_status,is_published").eq("manager_user_id",authUserId).maybeSingle().then(({data,error})=>{
+      if(!active)return;
+      if(error){notify("Couldn't load your facility profile: "+error.message);setOwnFacilityProfile(null);return;}
+      if(!data){setOwnFacilityProfile(null);return;}
+      setOwnFacilityProfile({id:String(data.id),verificationStatus:String(data.verification_status||"incomplete"),isPublished:Boolean(data.is_published)});
+      setFacilityDraft({name:String(data.name||""),area:String(data.area||""),type:String(data.facility_type||"Residential care"),description:String(data.description||""),services:Array.isArray(data.services)?data.services.join(", "):"",amenities:Array.isArray(data.amenities)?data.amenities.join(", "):"",capacity:data.capacity==null?"":String(data.capacity),monthlyFee:data.indicative_monthly_fee==null?"":String(data.indicative_monthly_fee),availability:String(data.availability_note||"")});
+    });
+    return()=>{active=false;};
+  },[path,authUserId,signedIn,userRoles.join(",")]);
+
+  useEffect(() => {
+    const client=supabase;
+    if(!client||!authUserId||!signedIn||path!=="/facility/enquiries"||!userRoles.includes("facility_manager")){setFacilityEnquiryRows([]);return;}
+    let active=true;
+    void(async()=>{
+      const {data,error}=await client.from("facility_enquiries").select("id,public_reference,facility_id,family_user_id,question,status,created_at,care_facilities!facility_enquiries_facility_id_fkey(name,manager_user_id)").order("created_at",{ascending:false});
+      if(!active)return;
+      if(error){notify("Couldn't load facility enquiries: "+error.message);setFacilityEnquiryRows([]);return;}
+      const rows=(data||[]).filter((row:any)=>{
+        const facility=Array.isArray(row.care_facilities)?row.care_facilities[0]:row.care_facilities;
+        return facility?.manager_user_id===authUserId;
+      }).map((row:any)=>{
+        const facility=Array.isArray(row.care_facilities)?row.care_facilities[0]:row.care_facilities;
+        return {id:String(row.id),reference:String(row.public_reference||String(row.id).slice(0,8)),facilityId:String(row.facility_id),familyUserId:String(row.family_user_id),facilityName:String(facility?.name||"Care facility"),question:String(row.question||""),status:String(row.status).replace(/_/g," "),createdAt:String(row.created_at)};
+      });
+      setFacilityEnquiryRows(rows);
+    })();
+    return()=>{active=false;};
+  },[path,authUserId,signedIn,userRoles.join(",")]);
 
   useEffect(() => {
     const client=supabase;
