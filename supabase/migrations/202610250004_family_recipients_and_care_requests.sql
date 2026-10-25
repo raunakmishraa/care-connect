@@ -28,6 +28,75 @@ create table if not exists public.care_requests (
  updated_at timestamptz not null default now(),
  constraint care_requests_valid_time check(end_time>start_time)
 );
+-- Compatibility with the baseline schema, which already creates care_requests
+-- using legacy names such as caregiver_id, public_reference, service_label,
+-- location_area, starts_at, and ends_at. CREATE TABLE IF NOT EXISTS does not
+-- alter an existing table, so add and backfill the workflow columns explicitly.
+alter table public.care_requests
+ add column if not exists reference_code text,
+ add column if not exists caregiver_profile_id uuid references public.caregiver_profiles(id) on delete restrict,
+ add column if not exists recipient_name text,
+ add column if not exists service text,
+ add column if not exists service_date date,
+ add column if not exists start_time time,
+ add column if not exists end_time time,
+ add column if not exists service_area text,
+ add column if not exists notes text not null default '',
+ add column if not exists budget_amount numeric(12,2) not null default 0,
+ add column if not exists responded_at timestamptz;
+
+do $$
+begin
+ if exists(select 1 from information_schema.columns where table_schema='public' and table_name='care_requests' and column_name='public_reference') then
+   execute 'update public.care_requests set reference_code=public_reference where reference_code is null';
+ end if;
+ if exists(select 1 from information_schema.columns where table_schema='public' and table_name='care_requests' and column_name='caregiver_id') then
+   execute 'update public.care_requests set caregiver_profile_id=caregiver_id where caregiver_profile_id is null';
+ end if;
+ if exists(select 1 from information_schema.columns where table_schema='public' and table_name='care_requests' and column_name='service_label') then
+   execute 'update public.care_requests set service=service_label where service is null';
+ end if;
+ if exists(select 1 from information_schema.columns where table_schema='public' and table_name='care_requests' and column_name='location_area') then
+   execute 'update public.care_requests set service_area=location_area where service_area is null';
+ end if;
+ if exists(select 1 from information_schema.columns where table_schema='public' and table_name='care_requests' and column_name='family_message') then
+   execute format('update public.care_requests set notes=coalesce(family_message, %L) where notes is null or notes=%L', '', '');
+ end if;
+ if exists(select 1 from information_schema.columns where table_schema='public' and table_name='care_requests' and column_name='rate_amount') then
+   execute 'update public.care_requests set budget_amount=coalesce(rate_amount, 0) where budget_amount=0';
+ end if;
+ if exists(select 1 from information_schema.columns where table_schema='public' and table_name='care_requests' and column_name='starts_at') then
+   execute 'update public.care_requests set service_date=starts_at::date, start_time=starts_at::time where starts_at is not null and (service_date is null or start_time is null)';
+ end if;
+ if exists(select 1 from information_schema.columns where table_schema='public' and table_name='care_requests' and column_name='ends_at') then
+   execute 'update public.care_requests set end_time=ends_at::time where ends_at is not null and end_time is null';
+ end if;
+ if exists(select 1 from information_schema.columns where table_schema='public' and table_name='care_requests' and column_name='recipient_id')
+    and to_regclass('public.care_recipients') is not null then
+   execute 'update public.care_requests cr set recipient_name=coalesce(r.preferred_name, ''Care recipient'') from public.care_recipients r where cr.recipient_id=r.id and cr.recipient_name is null';
+ end if;
+end $$;
+
+-- New workflow inserts use the new columns. Existing legacy columns are retained
+-- for compatibility, but must not remain required for those inserts.
+do $$
+declare c text;
+begin
+ foreach c in array array['public_reference','recipient_id','caregiver_id','service_label','location_area','starts_at','ends_at'] loop
+   if exists(select 1 from information_schema.columns where table_schema='public' and table_name='care_requests' and column_name=c) then
+     execute format('alter table public.care_requests alter column %I drop not null', c);
+   end if;
+ end loop;
+end $$;
+
+-- The baseline status is an enum that cannot store this workflow's statuses.
+alter table public.care_requests alter column status drop default;
+alter table public.care_requests alter column status type text using status::text;
+alter table public.care_requests alter column status set default 'pending_response';
+alter table public.care_requests alter column status set not null;
+
+create unique index if not exists care_requests_reference_code_uidx
+ on public.care_requests(reference_code) where reference_code is not null;
 create index if not exists care_requests_family_created_idx on public.care_requests(family_user_id,created_at desc);
 create index if not exists care_requests_caregiver_created_idx on public.care_requests(caregiver_profile_id,created_at desc);
 create table if not exists public.care_request_messages (
