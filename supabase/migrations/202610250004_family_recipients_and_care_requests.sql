@@ -108,5 +108,7 @@ create policy "participants send request messages" on public.care_request_messag
 
 grant usage on schema public to authenticated;
 grant select, insert, update, delete on public.family_care_recipients to authenticated;
-grant select, insert, update on public.care_requests to authenticated;
+revoke update on public.care_requests from authenticated;
+grant select, insert on public.care_requests to authenticated;
+grant update (status, responded_at) on public.care_requests to authenticated;
 grant select, insert on public.care_request_messages to authenticated;
