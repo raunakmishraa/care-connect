@@ -275,8 +275,11 @@ function App() {
     budget: "",
     notes: "",
   });
-  const [requests, setRequests] = useState<Array<{ref:string;name:string;service:string;date:string;status:string;amount:number}>>([]);
+  const [requests, setRequests] = useState<Array<{id:string;ref:string;name:string;service:string;date:string;status:string;amount:number;caregiverProfileId:string;familyUserId:string;recipient:string;area:string;tasks:string;notes:string;start:string;end:string}>>([]);
   const [recipients, setRecipients] = useState<string[]>([]);
+  const [requestBusy, setRequestBusy] = useState(false);
+  const [clarificationFor, setClarificationFor] = useState<string | null>(null);
+  const [requestMessages, setRequestMessages] = useState<Record<string, Array<{message:string;sender_user_id:string;created_at:string}>>>({});
   const [newRecipient, setNewRecipient] = useState("");
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState<Array<{from:string;text:string;time:string}>>([]);
@@ -316,6 +319,43 @@ function App() {
     }
   }, [toast]);
   useEffect(() => setMobileOpen(false), [path]);
+  useEffect(() => {
+    if (!supabase || !authUserId || !signedIn || !userRoles.includes("family")) { setRecipients([]); return; }
+    let active=true;
+    void supabase.from("family_care_recipients").select("full_name,relationship").eq("family_user_id",authUserId).order("created_at")
+      .then(({data,error})=>{if(!active)return;if(error){notify("Couldn't load recipients: "+error.message);setRecipients([]);return;}setRecipients((data||[]).map((x:any)=>`${x.full_name} · ${x.relationship||"Recipient"}`));});
+    return ()=>{active=false;};
+  },[authUserId,signedIn,userRoles.join(",")]);
+  useEffect(() => {
+    if(!supabase||!authUserId||!signedIn){setRequests([]);return;}
+    const familyView=userRoles.includes("family")&&path.startsWith("/app");
+    const caregiverView=userRoles.includes("caregiver")&&(path==="/caregiver/requests"||path==="/caregiver");
+    if(!familyView&&!caregiverView)return;
+    let active=true;
+    void(async()=>{
+      let q=supabase.from("care_requests").select("id,reference_code,family_user_id,caregiver_profile_id,recipient_name,service,service_date,start_time,end_time,service_area,tasks,notes,budget_amount,status,caregiver_profiles!care_requests_caregiver_profile_id_fkey(public_name,user_id)").order("created_at",{ascending:false});
+      if(familyView)q=q.eq("family_user_id",authUserId);
+      const {data,error}=await q;if(!active)return;
+      if(error){notify("Couldn't load requests: "+error.message);setRequests([]);return;}
+      setRequests((data||[]).filter((x:any)=>!caregiverView||x.caregiver_profiles?.user_id===authUserId).map((x:any)=>({id:String(x.id),ref:String(x.reference_code),name:String(x.caregiver_profiles?.public_name||"Caregiver"),service:String(x.service),date:`${x.service_date} · ${String(x.start_time).slice(0,5)}–${String(x.end_time).slice(0,5)}`,status:String(x.status).replace(/_/g," "),amount:Number(x.budget_amount||0),caregiverProfileId:String(x.caregiver_profile_id),familyUserId:String(x.family_user_id),recipient:String(x.recipient_name),area:String(x.service_area||""),tasks:String(x.tasks||""),notes:String(x.notes||""),start:String(x.start_time).slice(0,5),end:String(x.end_time).slice(0,5)})));
+    })();return()=>{active=false;};
+  },[path,authUserId,signedIn,userRoles.join(",")]);
+
+  useEffect(() => {
+    if (!supabase || !userRoles.includes("family") || !requests.length || !path.startsWith("/app")) { setRequestMessages({}); return; }
+    let active = true;
+    const ids = requests.map((r) => r.id);
+    void supabase.from("care_request_messages").select("request_id,message,sender_user_id,created_at").in("request_id", ids).order("created_at", { ascending: true })
+      .then(({ data, error }) => {
+        if (!active) return;
+        if (error) { console.error("Unable to load request clarifications:", error.message); return; }
+        const grouped: Record<string, Array<{message:string;sender_user_id:string;created_at:string}>> = {};
+        (data || []).forEach((row: any) => { (grouped[row.request_id] ||= []).push({message:String(row.message),sender_user_id:String(row.sender_user_id),created_at:String(row.created_at)}); });
+        setRequestMessages(grouped);
+      });
+    return () => { active = false; };
+  }, [requests.map((r) => r.id + ":" + r.status).join(","), path, userRoles.join(",")]);
+
   useEffect(() => {
     if (!["/caregiver", "/caregiver/profile"].includes(path) || !supabase || !authUserId || !userRoles.includes("caregiver")) {
       setOwnCaregiverStatus(null);
@@ -1083,40 +1123,17 @@ function App() {
     setStep(1);
     setModal("request");
   };
-  const submitRequest = () => {
-    if (!request.date || !request.area.trim()) {
-      notify("Add a date and service location to continue.");
-      return;
-    }
-    const ref =
-      "CC-" +
-      new Date().getFullYear().toString().slice(-2) +
-      (new Date().getMonth() + 1).toString().padStart(2, "0") +
-      "-" +
-      Math.floor(1000 + Math.random() * 8999);
-    setRequests((r) => [
-      {
-        ref,
-        name: (selected as Caregiver | null)?.name || "",
-        service: request.service,
-        date: `${request.date} · ${request.start}–${request.end}`,
-        status: "Pending response",
-        amount:
-          Number(request.budget || 0) *
-          Math.max(
-            1,
-            Math.ceil(
-              Number(request.end.split(":")[0]) -
-                Number(request.start.split(":")[0]) || 1,
-            ),
-          ),
-      },
-      ...r,
-    ]);
-    setModal(null);
-    setStep(1);
-    go("/app/requests");
-    notify(`Request ${ref} submitted. It is not a confirmed booking.`);
+  const submitRequest = async () => {
+    if(!supabase||!authUserId||!userRoles.includes("family")){notify("Sign in with a family account to submit a care request.");return;}
+    const caregiver=selected as Caregiver|null;
+    if(!caregiver?.id||!request.recipient||!request.date||!request.area.trim()){notify("Choose a recipient, date and service location.");return;}
+    if(request.end<=request.start){notify("End time must be later than start time.");return;}
+    setRequestBusy(true);
+    const ref="AC-"+new Date().getFullYear().toString().slice(-2)+(new Date().getMonth()+1).toString().padStart(2,"0")+"-"+Math.floor(1000+Math.random()*8999);
+    const mins=(Number(request.end.split(":")[0])*60+Number(request.end.split(":")[1]||0))-(Number(request.start.split(":")[0])*60+Number(request.start.split(":")[1]||0));
+    const {data,error}=await supabase.from("care_requests").insert({reference_code:ref,family_user_id:authUserId,caregiver_profile_id:caregiver.id,recipient_name:request.recipient,service:request.service||"Daily living support",service_date:request.date,start_time:request.start,end_time:request.end,service_area:request.area.trim(),tasks:request.tasks.trim(),notes:request.notes.trim(),budget_amount:Number(request.budget||0)*Math.max(1,mins/60),status:"pending_response"}).select("id").single();
+    setRequestBusy(false);if(error||!data){notify("Request wasn't saved: "+(error?.message||"Try again."));return;}
+    setModal(null);setStep(1);setRequest({recipient:"",service:"",date:"",start:"09:00",end:"12:00",area:"",tasks:"",budget:"",notes:""});go("/app/requests");notify(`Request ${ref} submitted and saved. It is not a confirmed booking.`);
   };
   const publicNav = [
     ["/", t.home],
@@ -1905,6 +1922,7 @@ function App() {
           )}
         </Modal>
       )}
+      {clarificationFor && <Modal title="Ask the family for details" onClose={()=>setClarificationFor(null)}><div className="modal-form"><p className="muted">Your question will be saved with this care request and visible to the family.</p><label>Question<textarea id="clarification-message" rows={4} maxLength={1500}/></label><button className="button button-primary full" disabled={requestBusy} onClick={()=>void(async()=>{const text=(document.getElementById("clarification-message") as HTMLTextAreaElement|null)?.value.trim()||"";const item=requests.find(x=>x.id===clarificationFor);if(!text||!item||!supabase||!authUserId){notify("Enter a question before sending.");return;}setRequestBusy(true);const {error}=await supabase.from("care_request_messages").insert({request_id:item.id,sender_user_id:authUserId,message:text});if(!error&&item.status==="pending response")await supabase.from("care_requests").update({status:"clarification_requested"}).eq("id",item.id).eq("caregiver_profile_id",item.caregiverProfileId).eq("status","pending_response");setRequestBusy(false);if(error){notify("Question wasn't saved: "+error.message);return;}setRequests(xs=>xs.map(x=>x.id===item.id?{...x,status:"clarification requested"}:x));setClarificationFor(null);notify("Question sent to the family.");})()}>Send question <Send size={16}/></button></div></Modal>}
       {toast && (
         <div className="toast" role="status">
           <CheckCircle2 size={18} />
@@ -2061,6 +2079,11 @@ function App() {
                   <span className="eyebrow">{r.ref}</span>
                   <h3>{r.name}</h3>
                   <p>{r.service}</p>
+                  {requestMessages[r.id]?.map((entry, index) => (
+                    <div className="inline-note" key={entry.created_at + index}>
+                      <MessageCircle size={15} /> {entry.sender_user_id === authUserId ? "Your message: " : "Caregiver asks: "}{entry.message}
+                    </div>
+                  ))}
                   <div className="request-meta">
                     <span>
                       <CalendarDays size={14} />
@@ -2068,7 +2091,7 @@ function App() {
                     </span>
                     <span>
                       <MapPin size={14} />
-                      {request.area}
+                      {r.area}
                     </span>
                   </div>
                 </div>
@@ -2179,17 +2202,14 @@ function App() {
             </label>
             <button
               className="button button-primary"
-              onClick={() => {
-                if (!newRecipient.trim()) {
-                  notify("Enter a preferred name.");
-                  return;
-                }
-                setRecipients((r) => [
-                  ...r,
-                  `${newRecipient.trim()} · Recipient`,
-                ]);
-                setNewRecipient("");
-                notify("Recipient added to this demo.");
+              disabled={requestBusy}
+              onClick={async () => {
+                if(!supabase||!authUserId||!userRoles.includes("family")){notify("Sign in with a family account.");return;}
+                if(!newRecipient.trim()){notify("Enter a preferred name.");return;}
+                setRequestBusy(true);
+                const {data,error}=await supabase.from("family_care_recipients").insert({family_user_id:authUserId,full_name:newRecipient.trim(),relationship:"Recipient"}).select("full_name,relationship").single();
+                setRequestBusy(false);if(error||!data){notify("Recipient wasn't saved: "+(error?.message||"Try again."));return;}
+                setRecipients((items)=>[...items,`${data.full_name} · ${data.relationship}`]);setRequest((x)=>({...x,recipient:data.full_name}));setNewRecipient("");notify("Care recipient saved to your family account.");
               }}
             >
               Save recipient <Check size={16} />
@@ -2380,21 +2400,21 @@ function App() {
                 <div className="button-row">
                   <button
                     className="button button-secondary small"
-                    onClick={() =>
-                      notify(
-                        "Clarification workflow needs a connected backend.",
-                      )
-                    }
+                    onClick={() => setClarificationFor(r.id)}
                   >
                     Ask details
                   </button>
                   <button
                     className="button button-primary small"
-                    onClick={() =>
-                      notify(
-                        "This request cannot be accepted until the secure booking service is configured.",
-                      )
-                    }
+                    disabled={requestBusy || r.status !== "pending response"}
+                    onClick={() => void (async()=>{
+                      if(!supabase||!authUserId)return;setRequestBusy(true);
+                      const {data:profile}=await supabase.from("caregiver_profiles").select("id").eq("user_id",authUserId).maybeSingle();
+                      if(!profile){setRequestBusy(false);notify("No caregiver profile is linked to this account.");return;}
+                      const {data,error}=await supabase.from("care_requests").update({status:"accepted_pending_terms",responded_at:new Date().toISOString()}).eq("id",r.id).eq("caregiver_profile_id",profile.id).eq("status","pending_response").select("id").maybeSingle();
+                      setRequestBusy(false);if(error||!data){notify("Request could not be accepted: "+(error?.message||"It may have changed already."));return;}
+                      setRequests((items)=>items.map((x)=>x.id===r.id?{...x,status:"accepted pending terms"}:x));notify("Request accepted. This is not a confirmed booking.");
+                    })()}
                   >
                     Accept
                   </button>
@@ -4306,13 +4326,16 @@ function RequestWizard({
               value={request.recipient}
               onChange={(e) => set("recipient", e.target.value)}
             >
+              <option value="">Choose a care recipient</option>
               {recipientOptions.map((r: string) => (
-                <option key={r} value={r.split(" · ")[0]}>
-                  {r}
-                </option>
+                <option key={r} value={r.split(" · ")[0]}>{r}</option>
               ))}
             </select>
           </label>
+          <button type="button" className="text-link" onClick={() => { onClose(); window.location.assign("/app/recipients"); }}>
+            + Add a care recipient <ArrowRight size={14} />
+          </button>
+          {recipientOptions.length === 0 && <p className="muted">No recipients saved yet. Add one on the Care recipients page first.</p>}
           <div className="inline-note">
             <LockKeyhole size={16} /> Only share another person's information
             when you have permission to do so.
