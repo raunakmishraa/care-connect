@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
   Activity,
@@ -280,6 +280,7 @@ function App() {
     notes: "",
   });
   const [requests, setRequests] = useState<Array<{id:string;ref:string;name:string;service:string;date:string;status:string;amount:number;caregiverProfileId:string;facilityId:string|null;providerType:"caregiver"|"facility";providerUserId:string;familyUserId:string;recipient:string;area:string;tasks:string;notes:string;start:string;end:string}>>([]);
+  const seenRequestStatuses = useRef<Record<string, string>>({});
   const [recipients, setRecipients] = useState<string[]>([]);
   const [requestBusy, setRequestBusy] = useState(false);
   const [clarificationFor, setClarificationFor] = useState<string | null>(null);
@@ -370,6 +371,19 @@ function App() {
     const timer=window.setInterval(()=>void load(),5000);
     return()=>{active=false;window.clearInterval(timer);};
   },[path,authUserId,signedIn,userRoles.join(",")]);
+
+  useEffect(() => {
+    if(!userRoles.includes("family"))return;
+    for(const item of requests){
+      const previous=seenRequestStatuses.current[item.id];
+      if(previous&&previous!==item.status){
+        if(item.status==="clarification requested")notify("A provider asked for more information. Open Requests & bookings to reply.");
+        else if(item.status==="accepted pending terms")notify("Your care request was accepted. Open Messages to discuss details, then confirm the booking.");
+        else if(item.status==="confirmed")notify("Your booking is confirmed. You can continue coordinating in Messages.");
+      }
+      seenRequestStatuses.current[item.id]=item.status;
+    }
+  },[requests.map((item)=>item.id+":"+item.status).join(","),userRoles.join(",")]);
 
   useEffect(() => {
     const client=supabase;
