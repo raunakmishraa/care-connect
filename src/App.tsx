@@ -4434,7 +4434,7 @@ function RequestWizard({
         <div className="wizard-content">
           <h3>Review before sending</h3>
           <p className="muted">
-            Check the details below. The caregiver may ask questions or propose
+            Check the details below. The provider may ask questions or propose
             changes.
           </p>
           <div className="review-summary">
@@ -4444,13 +4444,13 @@ function RequestWizard({
               </div>
               <div>
                 <b>{caregiver.name}</b>
-                <small>{caregiver.verified}</small>
+                <small>{providerType === "facility" ? "Approved facility listing" : caregiver.verified}</small>
               </div>
               <span className="soft-chip">Request to book</span>
             </div>
             {[
               ["Care recipient", request.recipient],
-              ["Support", request.service],
+              [providerType === "facility" ? "Placement" : "Support", request.service],
               ["Tasks", request.tasks],
               [
                 "Schedule",
@@ -4461,7 +4461,7 @@ function RequestWizard({
               ["Location", request.area],
               [
                 "Indicative rate",
-                `${formatNPR(Number(request.budget || 0))} / hour`,
+                `${formatNPR(Number(request.budget || 0))} / ${providerType === "facility" ? "month" : "hour"}`,
               ],
             ].map(([k, v]: any) => (
               <div className="review-detail" key={k}>
