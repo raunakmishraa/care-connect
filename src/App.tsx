@@ -407,6 +407,21 @@ function App() {
 
   useEffect(() => {
     const client=supabase;
+    if(!client||!authUserId||!signedIn||!userRoles.includes("family")||path!=="/app/enquiries"){setFacilityEnquiries([]);return;}
+    let active=true;
+    void client.from("facility_enquiries").select("public_reference,question,status,created_at,care_facilities!facility_enquiries_facility_id_fkey(name)").eq("family_user_id",authUserId).order("created_at",{ascending:false}).then(({data,error})=>{
+      if(!active)return;
+      if(error){notify("Couldn't load your facility enquiries: "+error.message);setFacilityEnquiries([]);return;}
+      setFacilityEnquiries((data||[]).map((row:any)=>{
+        const facility=Array.isArray(row.care_facilities)?row.care_facilities[0]:row.care_facilities;
+        return String(facility?.name||"Care facility")+" · "+String(row.status||"submitted").replace(/_/g," ")+" · "+String(row.public_reference||"")+" · "+String(row.question||"Facility information request");
+      }));
+    });
+    return()=>{active=false;};
+  },[path,authUserId,signedIn,userRoles.join(",")]);
+
+  useEffect(() => {
+    const client=supabase;
     if(!client||!authUserId||!signedIn||path!=="/facility/enquiries"||!userRoles.includes("facility_manager")){setFacilityEnquiryRows([]);return;}
     let active=true;
     void(async()=>{
@@ -866,6 +881,27 @@ function App() {
       if (authError) console.warn("Profile saved, but auth metadata was not updated:", authError.message);
     }
     notify("Profile information updated.");
+  };
+
+  const submitFacilityEnquiry = async () => {
+    const client=supabase;
+    const target=selected as FacilityListing|null;
+    if(!client||!authUserId||!userRoles.includes("family")){notify("Sign in with a family account to send a facility enquiry.");return;}
+    if(!target?.id){notify("This facility listing is not available. Please refresh the directory.");return;}
+    if(!query.trim()){notify("Write a question before sending.");return;}
+    setRequestBusy(true);
+    const reference="AE-"+new Date().getFullYear().toString().slice(-2)+String(Math.floor(100000+Math.random()*899999));
+    const {error}=await client.from("facility_enquiries").insert({
+      public_reference:reference,facility_id:target.id,family_user_id:authUserId,
+      question:query.trim(),status:"submitted",
+    });
+    setRequestBusy(false);
+    if(error){notify("Facility enquiry wasn't saved: "+error.message);return;}
+    setModal(null);setQuery("");
+    notify("Your enquiry was sent to the facility. Its status will appear in Care-home enquiries.");
+    if(path==="/app/enquiries") {
+      setFacilityEnquiries(current=>[target.name+" · submitted · "+reference+" · "+query.trim(),...current]);
+    }
   };
 
   const saveFacilityListing = async () => {
@@ -2054,19 +2090,10 @@ function App() {
               </label>
               <button
                 className="button button-primary full"
-                onClick={() => {
-                  setFacilityEnquiries((e) => [
-                    `${(selected as any)?.name || "Facility"} · Enquiry sent`,
-                    ...e,
-                  ]);
-                  setModal(null);
-                  setQuery("");
-                  notify(
-                    "This enquiry could not be sent because live enquiry submission is not configured.",
-                  );
-                }}
+                disabled={requestBusy}
+                onClick={() => void submitFacilityEnquiry()}
               >
-                Send enquiry <ArrowRight size={16} />
+                {requestBusy ? "Sending…" : "Send enquiry"} <ArrowRight size={16} />
               </button>
             </div>
           ) : (
