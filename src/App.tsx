@@ -461,10 +461,10 @@ function App() {
     const client=supabase;
     if(!client||!authUserId||!signedIn||!["/app/messages","/caregiver/messages","/facility/messages"].includes(path)){setConversationList([]);setConversationMessages([]);return;}
     let active=true;setConversationLoading(true);
-    void(async()=>{
+    const load=async(initial=false)=>{
       const {data,error}=await client.from("conversations").select("id,request_id,created_at,care_requests!conversations_request_id_fkey(id,reference_code,family_user_id,provider_type,caregiver_profile_id,facility_id,service,service_date,start_time,end_time,budget_amount,status,caregiver_profiles!care_requests_caregiver_profile_id_fkey(public_name,user_id),care_facilities!care_requests_facility_id_fkey(name,manager_user_id))").not("request_id","is",null).order("created_at",{ascending:false});
       if(!active)return;
-      if(error){console.error("Unable to load request conversations:",error.message);setConversationList([]);setConversationLoading(false);return;}
+      if(error){console.error("Unable to load request conversations:",error.message);if(initial){setConversationList([]);setConversationLoading(false);}return;}
       const one=(v:any)=>Array.isArray(v)?v[0]:v;
       const mapped=(data||[]).map((convo:any)=>{
         const req=one(convo.care_requests);if(!req)return null;
@@ -473,9 +473,13 @@ function App() {
         const partnerName=isFamily?String(providerType==="facility"?facility?.name||"Care facility":cg?.public_name||"Caregiver"):"Family · "+String(req.reference_code||"Care request");
         return {id:String(convo.id),requestId:String(req.id),ref:String(req.reference_code||"Care request"),name:partnerName,partnerUserId,service:String(req.service||"Care request"),date:`${req.service_date} · ${String(req.start_time).slice(0,5)}–${String(req.end_time).slice(0,5)}`,status:String(req.status).replace(/_/g," "),amount:Number(req.budget_amount||0),providerType};
       }).filter(Boolean) as Array<{id:string;requestId:string;ref:string;name:string;partnerUserId:string;service:string;date:string;status:string;amount:number;providerType:"caregiver"|"facility"}>;
-      setConversationList(mapped);setActiveConversationId((current)=>mapped.some((x)=>x.id===current)?current:(mapped[0]?.id||""));setConversationLoading(false);
-    })();
-    return()=>{active=false;};
+      setConversationList(mapped);
+      setActiveConversationId((current)=>mapped.some((x)=>x.id===current)?current:(mapped[0]?.id||""));
+      if(initial)setConversationLoading(false);
+    };
+    void load(true);
+    const timer=window.setInterval(()=>void load(false),5000);
+    return()=>{active=false;window.clearInterval(timer);};
   },[path,authUserId,signedIn,userRoles.join(",")]);
 
   useEffect(() => {
