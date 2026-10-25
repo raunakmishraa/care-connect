@@ -2459,46 +2459,17 @@ function App() {
       </>;
     }
     if (path === "/app/enquiries") {
-      return (
-        <>
-          <PageHeader
-            eyebrow="FACILITY DISCOVERY"
-            title="Care-home enquiries"
-            subtitle="Track your questions and any proposed visits."
-            action={
-              <button
-                className="button button-secondary"
-                onClick={() => go("/care-homes")}
-              >
-                Explore care homes
-              </button>
-            }
-          />
-          {facilityEnquiries.length ? (
-            facilityEnquiries.map((e, i) => (
-              <div className="request-row" key={i}>
-                <div className="request-icon">
-                  <House />
-                </div>
-                <div className="request-info">
-                  <h3>{e.split(" · ")[0]}</h3>
-                  <p>Facility information request</p>
-                </div>
-                <StatusPill status="Submitted" />
-                <span className="muted">Awaiting follow-up</span>
-              </div>
-            ))
-          ) : (
-            <EmptyState
-              icon={<House />}
-              title="No enquiries yet"
-              text="When you ask a care home a question, its status and next steps will show here."
-              action="Explore care homes"
-              onClick={() => go("/care-homes")}
-            />
-          )}
-        </>
-      );
+      return <>
+        <PageHeader eyebrow="FACILITY DISCOVERY" title="Care-home enquiries" subtitle="Track the actual questions you've sent to care facilities." action={<button className="button button-secondary" onClick={()=>go("/care-homes")}>Explore care homes</button>}/>
+        {facilityEnquiries.length ? facilityEnquiries.map((e,i)=>{
+          const parts=e.split(" · ");
+          return <div className="request-row" key={i}>
+            <div className="request-icon"><House/></div>
+            <div className="request-info"><span className="eyebrow">{parts[2]}</span><h3>{parts[0]}</h3><p>{parts.slice(3).join(" · ")||"Facility information request"}</p><p className="muted">Facility information request</p></div>
+            <StatusPill status={parts[1]||"submitted"}/>
+          </div>;
+        }) : <EmptyState icon={<House/>} title="No enquiries yet" text="When you ask a care home a question, your enquiry and its current status will appear here." action="Explore care homes" onClick={()=>go("/care-homes")}/>}
+      </>;
     }
     if (path === "/caregiver/requests" || path === "/facility/requests") {
       const facilityWorkspace=path==="/facility/requests";
@@ -2668,22 +2639,15 @@ function App() {
       </>;
     }
     if (path === "/facility/enquiries") {
-      return (
-        <>
-          <PageHeader
-            eyebrow="FAMILY QUESTIONS"
-            title="Enquiries"
-            subtitle="Respond to questions and arrange visits where your team can confirm them."
-          />
-          <EmptyState
-            icon={<MessageCircle />}
-            title="No new enquiries"
-            text="New family questions will appear here once your facility is published and the enquiry API is connected."
-            action="Manage listing"
-            onClick={() => go("/facility/listing")}
-          />
-        </>
-      );
+      return <>
+        <PageHeader eyebrow="FAMILY QUESTIONS" title="Enquiries" subtitle="Read real family enquiries submitted to your facility."/>
+        {facilityEnquiryRows.map((enquiry)=><article className="request-row" key={enquiry.id}>
+          <div className="request-icon"><MessageCircle/></div>
+          <div className="request-info"><span className="eyebrow">{enquiry.reference}</span><h3>{enquiry.facilityName}</h3><p>{enquiry.question||"No question was added."}</p><p className="muted">Received {new Date(enquiry.createdAt).toLocaleString()}</p></div>
+          <div className="request-side"><StatusPill status={enquiry.status}/><button className="button button-secondary small" onClick={()=>go("/facility/requests")}>Care requests <ArrowRight size={14}/></button></div>
+        </article>)}
+        {facilityEnquiryRows.length===0&&<EmptyState icon={<MessageCircle/>} title="No family enquiries yet" text="Questions submitted from your published facility listing will appear here." action="Manage listing" onClick={()=>go("/facility/listing")}/>}
+      </>;
     }
     if (path === "/admin/verifications") {
       const pendingApplications = providerApplications.filter((application) => ["submitted", "under_review", "action_required"].includes(application.status));
