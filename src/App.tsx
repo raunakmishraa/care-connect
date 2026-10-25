@@ -2212,7 +2212,7 @@ function App() {
                   <h3>{r.name}</h3>
                   <p>{r.service}</p>
                   {requestMessages[r.id]?.map((entry,index)=><div className="inline-note" key={entry.created_at+index}><MessageCircle size={15}/>{entry.sender_user_id===authUserId?" You: ":r.providerType==="facility"?" Facility: ":" Caregiver: "}{entry.message}{!entry.encrypted&&<small> · legacy message</small>}</div>)}
-                  {(r.status === "clarification requested" || r.status === "accepted pending terms" || r.status === "confirmed") && <div className="request-reply"><label htmlFor={"reply-"+r.id}>Reply to {r.providerType === "facility" ? "facility" : "caregiver"}</label><textarea id={"reply-"+r.id} rows={2} maxLength={1500} value={replyDrafts[r.id]||""} onChange={(event)=>setReplyDrafts(current=>({...current,[r.id]:event.target.value}))} placeholder="Write a reply…"/><button className="button button-secondary small" disabled={requestBusy||!(replyDrafts[r.id]||"").trim()} onClick={()=>void sendRequestMessage(r)}>Send encrypted reply <Send size={14}/></button></div>}
+                  {r.status === "clarification requested" && <div className="request-reply"><label htmlFor={"reply-"+r.id}>Reply to {r.providerType === "facility" ? "facility" : "caregiver"}</label><textarea id={"reply-"+r.id} rows={2} maxLength={1500} value={replyDrafts[r.id]||""} onChange={(event)=>setReplyDrafts(current=>({...current,[r.id]:event.target.value}))} placeholder="Write a reply…"/><button className="button button-secondary small" disabled={requestBusy||!(replyDrafts[r.id]||"").trim()} onClick={()=>void sendRequestMessage(r)}>Send encrypted reply <Send size={14}/></button></div>}
                   <div className="request-meta">
                     <span>
                       <CalendarDays size={14} />
@@ -2229,7 +2229,7 @@ function App() {
                   <strong>{formatNPR(r.amount)}</strong>
                   <span className="muted tiny">Estimate · not a payment</span>
                   {r.status === "accepted pending terms" && <button className="button button-primary small" disabled={requestBusy} onClick={()=>void confirmCareRequest(r)}>Confirm booking <CheckCircle2 size={14}/></button>}
-                  <button className="text-link" onClick={() => { const chat = conversationList.find((conversation) => conversation.requestId === r.id); if (chat) { setActiveConversationId(chat.id); go("/app/messages"); } else notify("Messaging opens once the provider accepts this request."); }}>
+                  <button className="text-link" onClick={() => { if (["accepted pending terms","confirmed","completed"].includes(r.status)) go("/app/messages"); else notify("Messaging opens once the provider accepts this request."); }}>
                     {["accepted pending terms","confirmed","completed"].includes(r.status) ? "Open conversation" : "View request"} <ArrowRight size={14} />
                   </button>
                 </div>
@@ -2415,7 +2415,7 @@ function App() {
         <div className="notice-bar"><ShieldCheck size={18}/> Accepting a request opens a private encrypted conversation. A booking is confirmed only after the family reviews and confirms the requested terms.</div>
         {requests.map((r)=><div className="request-row" key={r.id}>
           <div className="request-icon">{facilityWorkspace?<House/>:<ClipboardList/>}</div>
-          <div className="request-info"><span className="eyebrow">{r.ref}</span><h3>{r.recipient} · {r.service}</h3><p>{r.date}</p><p className="muted">Requested by a family · {r.area} · {r.tasks||"No additional task details provided."}</p>{r.notes&&<p>{r.notes}</p>}</div>
+          <div className="request-info"><span className="eyebrow">{r.ref}</span><h3>{r.recipient} · {r.service}</h3><p>{r.date}</p><p className="muted">Requested by a family · {r.area} · {r.tasks||"No additional task details provided."}</p>{r.notes&&<p>{r.notes}</p>}{requestMessages[r.id]?.map((entry,index)=><div className="inline-note" key={entry.created_at+index}><MessageCircle size={14}/>{entry.sender_user_id===authUserId?"You: ":"Family: "}{entry.message}{!entry.encrypted&&<small> · legacy message</small>}</div>)}</div>
           <div className="request-side"><StatusPill status={r.status}/><strong>{formatNPR(r.amount)}{facilityWorkspace?" / month (indicative)":""}</strong>
             <div className="button-row">
               {["pending response","clarification requested"].includes(r.status)&&<button className="button button-secondary small" onClick={()=>setClarificationFor(r.id)} disabled={requestBusy}>Ask details</button>}
@@ -4474,8 +4474,7 @@ function RequestWizard({
             <InfoIcon />
             <span>
               <b>
-                This sends a request. The booking is not confirmed until the
-                caregiver accepts and the booking is confirmed.
+                This sends a request. The booking is not confirmed until the provider accepts and the family confirms after reviewing the details.
               </b>{" "}
               Online payments are not processed in this MVP. Review cancellation
               terms before confirming.
