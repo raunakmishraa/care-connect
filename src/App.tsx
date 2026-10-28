@@ -272,6 +272,10 @@ function App() {
   const [profilePhone, setProfilePhone] = useState("");
   const [profileEmail, setProfileEmail] = useState("");
   const [profileSaving, setProfileSaving] = useState(false);
+  const [currentAccountPassword, setCurrentAccountPassword] = useState("");
+  const [newAccountPassword, setNewAccountPassword] = useState("");
+  const [confirmAccountPassword, setConfirmAccountPassword] = useState("");
+  const [passwordSaving, setPasswordSaving] = useState(false);
   const [authConfirmPassword, setAuthConfirmPassword] = useState("");
   const [signupAccountType, setSignupAccountType] = useState<"family" | "caregiver" | "care_home">("family");
   const [authMode, setAuthMode] = useState<
@@ -941,6 +945,55 @@ function App() {
     }
     notify("Profile information updated.");
   };
+  const changeAccountPassword = async () => {
+    if (!supabase || !authUserId) {
+      notify("Please sign in again before changing your password.");
+      return;
+    }
+    if (!profileEmail.trim()) {
+      notify("Your account email could not be identified. Sign in again and retry.");
+      return;
+    }
+    if (!currentAccountPassword) {
+      notify("Enter your current password to continue.");
+      return;
+    }
+    if (newAccountPassword.length < 8) {
+      notify("Choose a new password with at least 8 characters.");
+      return;
+    }
+    if (newAccountPassword !== confirmAccountPassword) {
+      notify("The new passwords do not match.");
+      return;
+    }
+    if (newAccountPassword === currentAccountPassword) {
+      notify("Choose a new password different from your current password.");
+      return;
+    }
+
+    setPasswordSaving(true);
+    try {
+      const { data: reauthenticated, error: reauthError } = await supabase.auth.signInWithPassword({
+        email: profileEmail.trim(),
+        password: currentAccountPassword,
+      });
+      if (reauthError || reauthenticated.user?.id !== authUserId) {
+        throw new Error(reauthError?.message || "Please sign in again and retry changing your password.");
+      }
+      const { error } = await supabase.auth.updateUser({ password: newAccountPassword });
+      if (error) throw error;
+      setCurrentAccountPassword("");
+      setNewAccountPassword("");
+      setConfirmAccountPassword("");
+      notify("Your password has been changed successfully.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown authentication error";
+      notify(authErrorMessage(message));
+    } finally {
+      setPasswordSaving(false);
+    }
+  };
+
 
   const submitFacilityEnquiry = async () => {
     const client=supabase;
@@ -1742,6 +1795,12 @@ function App() {
                 )
               }
               onProfile={(c) => {
+                if (!signedIn) {
+                  setSelected(c);
+                  openAuth("signin");
+                  notify("Sign in or create an account to view caregiver profiles.");
+                  return;
+                }
                 setSelected(c);
                 go("/caregivers/" + c.id);
               }}
@@ -1766,6 +1825,12 @@ function App() {
               }
               onRequest={requestCare}
               onProfile={(c) => {
+                if (!signedIn) {
+                  setSelected(c);
+                  openAuth("signin");
+                  notify("Sign in or create an account to view caregiver profiles.");
+                  return;
+                }
                 setSelected(c);
                 go("/caregivers/" + c.id);
               }}
@@ -2251,6 +2316,32 @@ function App() {
               <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
                 <button className="button button-primary" type="submit" disabled={profileSaving}>
                   {profileSaving ? "Saving…" : "Save changes"}
+                </button>
+              </div>
+            </form>
+          </section>
+          <section className="panel" style={{ maxWidth: 760, padding: 28, marginTop: 20 }}>
+            <div style={{ marginBottom: 20 }}>
+              <h2 style={{ margin: "0 0 6px" }}>Security</h2>
+              <p className="muted" style={{ margin: 0 }}>Change your account password. For your protection, confirm your current password first.</p>
+            </div>
+            <form style={{ display: "grid", gap: 16 }} onSubmit={(event) => { event.preventDefault(); void changeAccountPassword(); }}>
+              <label className="form-field">
+                <span>Current password</span>
+                <input style={{ width: "100%", padding: "12px 14px", border: "1px solid var(--border, #d5ddd8)", borderRadius: 10, font: "inherit", boxSizing: "border-box" }} type="password" autoComplete="current-password" value={currentAccountPassword} onChange={(event) => setCurrentAccountPassword(event.target.value)} required />
+              </label>
+              <label className="form-field">
+                <span>New password</span>
+                <input style={{ width: "100%", padding: "12px 14px", border: "1px solid var(--border, #d5ddd8)", borderRadius: 10, font: "inherit", boxSizing: "border-box" }} type="password" autoComplete="new-password" minLength={8} maxLength={128} value={newAccountPassword} onChange={(event) => setNewAccountPassword(event.target.value)} required />
+                <small className="muted">Use at least 8 characters.</small>
+              </label>
+              <label className="form-field">
+                <span>Confirm new password</span>
+                <input style={{ width: "100%", padding: "12px 14px", border: "1px solid var(--border, #d5ddd8)", borderRadius: 10, font: "inherit", boxSizing: "border-box" }} type="password" autoComplete="new-password" minLength={8} maxLength={128} value={confirmAccountPassword} onChange={(event) => setConfirmAccountPassword(event.target.value)} required />
+              </label>
+              <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 4 }}>
+                <button className="button button-primary" type="submit" disabled={passwordSaving || !currentAccountPassword || !newAccountPassword || !confirmAccountPassword}>
+                  {passwordSaving ? "Changing password…" : "Change password"}
                 </button>
               </div>
             </form>
