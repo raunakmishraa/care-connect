@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
   Activity,
@@ -59,6 +59,32 @@ import { formatNPR, supabase } from "./lib";
 import { decryptMessage, encryptMessage, ensureMessageIdentity } from "./lib/secure-messages";
 import ProviderApplication from "./ProviderApplication";
 import SupportChatbot from "./SupportChatbot";
+
+function sameLocalChatDay(left: string, right: string): boolean {
+  const a = new Date(left);
+  const b = new Date(right);
+  return a.getFullYear() === b.getFullYear()
+    && a.getMonth() === b.getMonth()
+    && a.getDate() === b.getDate();
+}
+
+function formatChatDate(value: string): string {
+  const date = new Date(value);
+  const today = new Date();
+  const dayNumber = (d: Date) => Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
+  const difference = Math.round((dayNumber(today) - dayNumber(date)) / 86_400_000);
+  if (difference === 0) return "Today";
+  if (difference === 1) return "Yesterday";
+  return date.toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "short",
+    year: date.getFullYear() === today.getFullYear() ? undefined : "numeric",
+  });
+}
+
+function formatChatTime(value: string): string {
+  return new Date(value).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+}
 
 const authErrorMessage = (message: string) => {
   if (
@@ -292,6 +318,7 @@ function App() {
   const [facilitySaving, setFacilitySaving] = useState(false);
   const [facilityEnquiryRows, setFacilityEnquiryRows] = useState<Array<{id:string;reference:string;familyUserId:string;facilityId:string;facilityName:string;question:string;status:string;createdAt:string}>>([]);
   const [conversationList, setConversationList] = useState<Array<{id:string;requestId:string;ref:string;name:string;partnerUserId:string;service:string;date:string;status:string;amount:number;providerType:"caregiver"|"facility"}>>([]);
+  const familyNameCache = useRef<Record<string, string>>({});
   const [activeConversationId, setActiveConversationId] = useState<string>("");
   const [conversationMessages, setConversationMessages] = useState<Array<{id:string;sender_user_id:string;body:string;created_at:string;encrypted:boolean}>>([]);
   const [conversationLoading, setConversationLoading] = useState(false);
@@ -480,13 +507,25 @@ function App() {
       if(!active)return;
       if(error){console.error("Unable to load request conversations:",error.message);if(initial){setConversationList([]);setConversationLoading(false);}return;}
       const one=(v:any)=>Array.isArray(v)?v[0]:v;
-      const mapped=(data||[]).map((convo:any)=>{
+      const mapped=(await Promise.all((data||[]).map(async(convo:any)=>{
         const req=one(convo.care_requests);if(!req)return null;
         const cg=one(req.caregiver_profiles),facility=one(req.care_facilities),providerType=String(req.provider_type||(req.facility_id?"facility":"caregiver")) as "caregiver"|"facility",isFamily=String(req.family_user_id)===authUserId;
+        const requestId=String(req.id);
         const partnerUserId=isFamily?String(providerType==="facility"?facility?.manager_user_id||"":cg?.user_id||""):String(req.family_user_id||"");
-        const partnerName=isFamily?String(providerType==="facility"?facility?.name||"Care facility":cg?.public_name||"Caregiver"):"Family · "+String(req.reference_code||"Care request");
-        return {id:String(convo.id),requestId:String(req.id),ref:String(req.reference_code||"Care request"),name:partnerName,partnerUserId,service:String(req.service||"Care request"),date:`${req.service_date} · ${String(req.start_time).slice(0,5)}–${String(req.end_time).slice(0,5)}`,status:String(req.status).replace(/_/g," "),amount:Number(req.budget_amount||0),providerType};
-      }).filter(Boolean) as Array<{id:string;requestId:string;ref:string;name:string;partnerUserId:string;service:string;date:string;status:string;amount:number;providerType:"caregiver"|"facility"}>;
+        let partnerName=isFamily?String(providerType==="facility"?facility?.name||"Care facility":cg?.public_name||"Caregiver"):"Family";
+        if(!isFamily){
+          let familyName=familyNameCache.current[requestId];
+          if(!familyName){
+            const {data:displayName,error:displayNameError}=await client.rpc("care_request_family_display_name",{p_request_id:requestId});
+            if(!displayNameError&&typeof displayName==="string"&&displayName.trim()){
+              familyName=displayName.trim();
+              familyNameCache.current[requestId]=familyName;
+            }
+          }
+          partnerName=familyName||"Family";
+        }
+        return {id:String(convo.id),requestId,ref:String(req.reference_code||"Care request"),name:partnerName,partnerUserId,service:String(req.service||"Care request"),date:`${req.service_date} · ${String(req.start_time).slice(0,5)}–${String(req.end_time).slice(0,5)}`,status:String(req.status).replace(/_/g," "),amount:Number(req.budget_amount||0),providerType};
+      }))).filter(Boolean) as Array<{id:string;requestId:string;ref:string;name:string;partnerUserId:string;service:string;date:string;status:string;amount:number;providerType:"caregiver"|"facility"}>;
       setConversationList(mapped);
       setActiveConversationId((current)=>mapped.some((x)=>x.id===current)?current:(mapped[0]?.id||""));
       if(initial)setConversationLoading(false);
@@ -2469,7 +2508,13 @@ function App() {
             <div className="chat-context"><CalendarDays size={16}/><span><b>{activeConversation.service}</b><small>{activeConversation.date} · {formatNPR(activeConversation.amount)} indicative</small></span>{userRoles.includes("family")&&activeConversation.status==="accepted pending terms"&&<button onClick={()=>{const item=requests.find((row)=>row.id===activeConversation.requestId);if(item)void confirmCareRequest(item);else notify("Open Requests & bookings to confirm this request.");}}>Confirm booking <ArrowRight size={13}/></button>}</div>
             <div className="chat-body">
               {conversationLoading&&conversationMessages.length===0&&<p className="muted">Loading messages…</p>}
-              {conversationMessages.map((m)=><div className={m.sender_user_id===authUserId?"message-bubble sent":"message-bubble"} key={m.id}><small>{m.sender_user_id===authUserId?"You":activeConversation.name} · {new Date(m.created_at).toLocaleString()}</small><p>{m.body}</p></div>)}
+              {conversationMessages.map((m,index)=>{
+                const showDate=index===0||!sameLocalChatDay(conversationMessages[index-1].created_at,m.created_at);
+                return <Fragment key={m.id}>
+                  {showDate&&<div className="chat-date-separator"><span>{formatChatDate(m.created_at)}</span></div>}
+                  <div className={m.sender_user_id===authUserId?"message-bubble sent":"message-bubble"}><small>{m.sender_user_id===authUserId?"You":activeConversation.name} · {formatChatTime(m.created_at)}</small><p>{m.body}</p></div>
+                </Fragment>;
+              })}
               {!conversationLoading&&conversationMessages.length===0&&<div className="empty-inline">Conversation opened. Discuss any changes to care, dates, availability or terms here.</div>}
             </div>
             <form className="chat-compose" onSubmit={sendChatMessage}><input value={message} onChange={(event)=>setMessage(event.target.value)} placeholder="Write a secure message…" aria-label="Write a message" maxLength={5000}/><button className="button button-primary" aria-label="Send message" disabled={requestBusy||!message.trim()}><Send size={17}/></button></form>
