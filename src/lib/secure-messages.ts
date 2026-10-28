@@ -138,14 +138,10 @@ function fromBase64(value: string): Uint8Array {
   return Uint8Array.from(atob(value), (character) => character.charCodeAt(0));
 }
 
-export async function encryptMessage(
-  client: SupabaseClient,
-  senderUserId: string,
-  recipientUserId: string,
-  plaintext: string,
-): Promise<{ ciphertext: string; iv: string }> {
-  await ensureMessageIdentity(client, senderUserId);
-  const key = await sharedKey(client, senderUserId, recipientUserId);
+type MessageEnvelope = { ciphertext: string; iv: string };
+type DualEnvelopePayload = { version: 2; envelopes: Record<string, MessageEnvelope> };
+
+async function encryptForKey(key: CryptoKey, plaintext: string): Promise<MessageEnvelope> {
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const encrypted = await crypto.subtle.encrypt(
     { name: "AES-GCM", iv },
@@ -153,6 +149,35 @@ export async function encryptMessage(
     encoder.encode(plaintext),
   );
   return { ciphertext: toBase64(new Uint8Array(encrypted)), iv: toBase64(iv) };
+}
+
+export async function encryptMessage(
+  client: SupabaseClient,
+  senderUserId: string,
+  recipientUserId: string,
+  plaintext: string,
+): Promise<{ ciphertext: string; iv: string }> {
+  await ensureMessageIdentity(client, senderUserId);
+
+  // Encrypt one envelope for the sender's own device/account and one for the peer.
+  // The same plaintext is never stored in the database.
+  const [senderKey, recipientKey] = await Promise.all([
+    sharedKey(client, senderUserId, senderUserId),
+    sharedKey(client, senderUserId, recipientUserId),
+  ]);
+  const [senderEnvelope, recipientEnvelope] = await Promise.all([
+    encryptForKey(senderKey, plaintext),
+    encryptForKey(recipientKey, plaintext),
+  ]);
+
+  const envelopes: Record<string, MessageEnvelope> = {
+    [senderUserId]: senderEnvelope,
+    [recipientUserId]: recipientEnvelope,
+  };
+  const payload: DualEnvelopePayload = { version: 2, envelopes };
+  // Existing schema requires both columns. The actual per-user IVs live inside
+  // the versioned envelope; "v2" marks this format without exposing plaintext.
+  return { ciphertext: JSON.stringify(payload), iv: "v2" };
 }
 
 export async function decryptMessage(
@@ -163,6 +188,40 @@ export async function decryptMessage(
   iv: string,
 ): Promise<string> {
   await ensureMessageIdentity(client, recipientUserId);
+
+  // New messages contain independently encrypted copies for each participant.
+  // For the sender's copy use the sender's own key; for a received copy use
+  // the sender/recipient ECDH shared key. Older single-envelope records remain
+  // supported where the current device has the appropriate key.
+  let payload: unknown;
+  try {
+    payload = JSON.parse(ciphertext);
+  } catch {
+    payload = null;
+  }
+  if (
+    payload &&
+    typeof payload === "object" &&
+    "version" in payload &&
+    (payload as { version?: unknown }).version === 2 &&
+    "envelopes" in payload
+  ) {
+    const envelopes = (payload as DualEnvelopePayload).envelopes;
+    const envelope = envelopes?.[recipientUserId];
+    if (!envelope?.ciphertext || !envelope?.iv) {
+      throw new Error("This message has no encrypted copy for the signed-in participant.");
+    }
+    const peerUserId = recipientUserId === senderUserId ? recipientUserId : senderUserId;
+    const key = await sharedKey(client, recipientUserId, peerUserId);
+    const plaintext = await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv: fromBase64(envelope.iv) },
+      key,
+      fromBase64(envelope.ciphertext),
+    );
+    return decoder.decode(plaintext);
+  }
+
+  // Backward compatibility for the original single-recipient envelope format.
   const key = await sharedKey(client, recipientUserId, senderUserId);
   const plaintext = await crypto.subtle.decrypt(
     { name: "AES-GCM", iv: fromBase64(iv) },
