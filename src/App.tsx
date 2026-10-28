@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
   Activity,
@@ -56,6 +56,7 @@ import {
   LogOut,
 } from "lucide-react";
 import { formatNPR, supabase } from "./lib";
+import { decryptMessage, encryptMessage, ensureMessageIdentity } from "./lib/secure-messages";
 import ProviderApplication from "./ProviderApplication";
 import SupportChatbot from "./SupportChatbot";
 
@@ -126,6 +127,9 @@ type Caregiver = {
 };
 const EMPTY_CAREGIVERS: Caregiver[] = [];
 type FacilityListing = {
+  id: string;
+  managerUserId: string;
+  monthlyFee: number;
   name: string;
   area: string;
   type: string;
@@ -275,14 +279,25 @@ function App() {
     budget: "",
     notes: "",
   });
-  const [requests, setRequests] = useState<Array<{id:string;ref:string;name:string;service:string;date:string;status:string;amount:number;caregiverProfileId:string;familyUserId:string;recipient:string;area:string;tasks:string;notes:string;start:string;end:string}>>([]);
+  const [requests, setRequests] = useState<Array<{id:string;ref:string;name:string;service:string;date:string;status:string;amount:number;caregiverProfileId:string;facilityId:string|null;providerType:"caregiver"|"facility";providerUserId:string;familyUserId:string;recipient:string;area:string;tasks:string;notes:string;start:string;end:string}>>([]);
+  const seenRequestStatuses = useRef<Record<string, string>>({});
   const [recipients, setRecipients] = useState<string[]>([]);
   const [requestBusy, setRequestBusy] = useState(false);
   const [clarificationFor, setClarificationFor] = useState<string | null>(null);
-  const [requestMessages, setRequestMessages] = useState<Record<string, Array<{message:string;sender_user_id:string;created_at:string}>>>({});
+  const [requestMessages, setRequestMessages] = useState<Record<string, Array<{message:string;sender_user_id:string;created_at:string;encrypted?:boolean}>>>({});
+  const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
+  const [facilityListings, setFacilityListings] = useState<FacilityListing[]>([]);
+  const [ownFacilityProfile, setOwnFacilityProfile] = useState<{id:string;verificationStatus:string;isPublished:boolean}|null>(null);
+  const [facilityDraft, setFacilityDraft] = useState({name:"",area:"",type:"Residential care",description:"",services:"",amenities:"",capacity:"",monthlyFee:"",availability:""});
+  const [facilitySaving, setFacilitySaving] = useState(false);
+  const [facilityEnquiryRows, setFacilityEnquiryRows] = useState<Array<{id:string;reference:string;familyUserId:string;facilityId:string;facilityName:string;question:string;status:string;createdAt:string}>>([]);
+  const [conversationList, setConversationList] = useState<Array<{id:string;requestId:string;ref:string;name:string;partnerUserId:string;service:string;date:string;status:string;amount:number;providerType:"caregiver"|"facility"}>>([]);
+  const [activeConversationId, setActiveConversationId] = useState<string>("");
+  const [conversationMessages, setConversationMessages] = useState<Array<{id:string;sender_user_id:string;body:string;created_at:string;encrypted:boolean}>>([]);
+  const [conversationLoading, setConversationLoading] = useState(false);
   const [newRecipient, setNewRecipient] = useState("");
   const [message, setMessage] = useState("");
-  const [messages, setMessages] = useState<Array<{from:string;text:string;time:string}>>([]);
+
   const [facilityEnquiries, setFacilityEnquiries] = useState<string[]>([]);
   const [incidentType, setIncidentType] = useState("Safety concern");
   const [incidentText, setIncidentText] = useState("");
@@ -327,26 +342,178 @@ function App() {
     return()=>{active=false;};
   },[authUserId,signedIn,userRoles.join(",")]);
   useEffect(() => {
+    if(!supabase||!authUserId||!signedIn)return;
+    void ensureMessageIdentity(supabase,authUserId).catch((error)=>console.warn("Secure messaging identity setup did not complete:",error));
+  },[authUserId,signedIn]);
+
+  useEffect(() => {
     if(!supabase||!authUserId||!signedIn){setRequests([]);return;}
     const familyView=userRoles.includes("family")&&path.startsWith("/app");
     const caregiverView=userRoles.includes("caregiver")&&(path==="/caregiver/requests"||path==="/caregiver");
-    if(!familyView&&!caregiverView)return;
+    const facilityView=userRoles.includes("facility_manager")&&(path==="/facility/requests"||path==="/facility");
+    if(!familyView&&!caregiverView&&!facilityView)return;
+    let active=true;
+    const load=async()=>{
+      let query=supabase!.from("care_requests").select("id,reference_code,family_user_id,provider_type,caregiver_profile_id,facility_id,recipient_name,service,service_date,start_time,end_time,service_area,tasks,notes,budget_amount,status,caregiver_profiles!care_requests_caregiver_profile_id_fkey(public_name,user_id),care_facilities!care_requests_facility_id_fkey(name,manager_user_id)").order("created_at",{ascending:false});
+      if(familyView)query=query.eq("family_user_id",authUserId);
+      const {data,error}=await query;if(!active)return;
+      if(error){console.error("Couldn't load requests:",error.message);return;}
+      const one=(v:any)=>Array.isArray(v)?v[0]:v;
+      setRequests((data||[]).filter((row:any)=>{
+        const type=String(row.provider_type||(row.facility_id?"facility":"caregiver")),cg=one(row.caregiver_profiles),facility=one(row.care_facilities);
+        return familyView||(caregiverView&&type==="caregiver"&&cg?.user_id===authUserId)||(facilityView&&type==="facility"&&facility?.manager_user_id===authUserId);
+      }).map((row:any)=>{
+        const cg=one(row.caregiver_profiles),facility=one(row.care_facilities),providerType=String(row.provider_type||(row.facility_id?"facility":"caregiver")) as "caregiver"|"facility";
+        return {id:String(row.id),ref:String(row.reference_code||"Care request"),name:String(providerType==="facility"?facility?.name||"Care facility":cg?.public_name||"Caregiver"),service:String(row.service||"Care request"),date:`${row.service_date} · ${String(row.start_time).slice(0,5)}–${String(row.end_time).slice(0,5)}`,status:String(row.status).replace(/_/g," "),amount:Number(row.budget_amount||0),caregiverProfileId:String(row.caregiver_profile_id||""),facilityId:row.facility_id?String(row.facility_id):null,providerType,providerUserId:String(providerType==="facility"?facility?.manager_user_id||"":cg?.user_id||""),familyUserId:String(row.family_user_id),recipient:String(row.recipient_name||"Care recipient"),area:String(row.service_area||""),tasks:String(row.tasks||""),notes:String(row.notes||""),start:String(row.start_time||"09:00").slice(0,5),end:String(row.end_time||"12:00").slice(0,5)};
+      }));
+    };
+    void load();
+    const timer=window.setInterval(()=>void load(),5000);
+    return()=>{active=false;window.clearInterval(timer);};
+  },[path,authUserId,signedIn,userRoles.join(",")]);
+
+  useEffect(() => {
+    if(!userRoles.includes("family"))return;
+    for(const item of requests){
+      const previous=seenRequestStatuses.current[item.id];
+      if(previous&&previous!==item.status){
+        if(item.status==="clarification requested")notify("A provider asked for more information. Open Requests & bookings to reply.");
+        else if(item.status==="accepted pending terms")notify("Your care request was accepted. Open Messages to discuss details, then confirm the booking.");
+        else if(item.status==="confirmed")notify("Your booking is confirmed. You can continue coordinating in Messages.");
+      }
+      seenRequestStatuses.current[item.id]=item.status;
+    }
+  },[requests.map((item)=>item.id+":"+item.status).join(","),userRoles.join(",")]);
+
+  useEffect(() => {
+    const client=supabase;
+    const familyView=userRoles.includes("family")&&path.startsWith("/app");
+    const providerView=(userRoles.includes("caregiver")||userRoles.includes("facility_manager"))&&(path==="/caregiver/requests"||path==="/facility/requests");
+    if(!client||!authUserId||!signedIn||!requests.length||(!familyView&&!providerView)){setRequestMessages({});return;}
+    let active=true;const ids=requests.map((r)=>r.id);
+    const load=async()=>{
+      const {data,error}=await client.from("care_request_messages").select("request_id,message,ciphertext,iv,sender_user_id,created_at").in("request_id",ids).order("created_at");
+      if(!active)return;if(error){console.error("Unable to load request messages",error.message);return;}
+      const grouped:Record<string,Array<{message:string;sender_user_id:string;created_at:string;encrypted?:boolean}>>={};
+      for(const row of data||[]){
+        let body=String(row.message||""),encrypted=false;
+        if(row.ciphertext&&row.iv){try{body=await decryptMessage(client,authUserId,String(row.sender_user_id),String(row.ciphertext),String(row.iv));encrypted=true;}catch{body="Encrypted message unavailable on this device.";encrypted=true;}}
+        (grouped[String(row.request_id)]||=[]).push({message:body,sender_user_id:String(row.sender_user_id),created_at:String(row.created_at),encrypted});
+      }
+      if(active)setRequestMessages(grouped);
+    };
+    void load();const timer=window.setInterval(()=>void load(),4000);
+    return()=>{active=false;window.clearInterval(timer);};
+  },[requests.map((r)=>r.id+":"+r.status).join(","),path,authUserId,signedIn,userRoles.join(",")]);
+
+
+  useEffect(() => {
+    const client=supabase;
+    if(!client||!authUserId||!signedIn||!userRoles.includes("facility_manager")||!(path==="/facility"||path==="/facility/listing")){setOwnFacilityProfile(null);return;}
+    let active=true;
+    void client.from("care_facilities").select("id,name,area,facility_type,description,services,amenities,capacity,indicative_monthly_fee,availability_note,verification_status,is_published").eq("manager_user_id",authUserId).maybeSingle().then(({data,error})=>{
+      if(!active)return;
+      if(error){notify("Couldn't load your facility profile: "+error.message);setOwnFacilityProfile(null);return;}
+      if(!data){setOwnFacilityProfile(null);return;}
+      setOwnFacilityProfile({id:String(data.id),verificationStatus:String(data.verification_status||"incomplete"),isPublished:Boolean(data.is_published)});
+      setFacilityDraft({name:String(data.name||""),area:String(data.area||""),type:String(data.facility_type||"Residential care"),description:String(data.description||""),services:Array.isArray(data.services)?data.services.join(", "):"",amenities:Array.isArray(data.amenities)?data.amenities.join(", "):"",capacity:data.capacity==null?"":String(data.capacity),monthlyFee:data.indicative_monthly_fee==null?"":String(data.indicative_monthly_fee),availability:String(data.availability_note||"")});
+    });
+    return()=>{active=false;};
+  },[path,authUserId,signedIn,userRoles.join(",")]);
+
+  useEffect(() => {
+    const client=supabase;
+    if(!client||!authUserId||!signedIn||!userRoles.includes("family")||path!=="/app/enquiries"){setFacilityEnquiries([]);return;}
+    let active=true;
+    void client.from("facility_enquiries").select("public_reference,question,status,created_at,care_facilities!facility_enquiries_facility_id_fkey(name)").eq("family_user_id",authUserId).order("created_at",{ascending:false}).then(({data,error})=>{
+      if(!active)return;
+      if(error){notify("Couldn't load your facility enquiries: "+error.message);setFacilityEnquiries([]);return;}
+      setFacilityEnquiries((data||[]).map((row:any)=>{
+        const facility=Array.isArray(row.care_facilities)?row.care_facilities[0]:row.care_facilities;
+        return String(facility?.name||"Care facility")+" · "+String(row.status||"submitted").replace(/_/g," ")+" · "+String(row.public_reference||"")+" · "+String(row.question||"Facility information request");
+      }));
+    });
+    return()=>{active=false;};
+  },[path,authUserId,signedIn,userRoles.join(",")]);
+
+  useEffect(() => {
+    const client=supabase;
+    if(!client||!authUserId||!signedIn||path!=="/facility/enquiries"||!userRoles.includes("facility_manager")){setFacilityEnquiryRows([]);return;}
     let active=true;
     void(async()=>{
-      let q=supabase.from("care_requests").select("id,reference_code,family_user_id,caregiver_profile_id,recipient_name,service,service_date,start_time,end_time,service_area,tasks,notes,budget_amount,status,caregiver_profiles!care_requests_caregiver_profile_id_fkey(public_name,user_id)").order("created_at",{ascending:false});
-      if(familyView)q=q.eq("family_user_id",authUserId);
-      const {data,error}=await q;if(!active)return;
-      if(error){notify("Couldn't load requests: "+error.message);setRequests([]);return;}
-      setRequests((data||[]).filter((x:any)=>!caregiverView||x.caregiver_profiles?.user_id===authUserId).map((x:any)=>({id:String(x.id),ref:String(x.reference_code),name:String(x.caregiver_profiles?.public_name||"Caregiver"),service:String(x.service),date:`${x.service_date} · ${String(x.start_time).slice(0,5)}–${String(x.end_time).slice(0,5)}`,status:String(x.status).replace(/_/g," "),amount:Number(x.budget_amount||0),caregiverProfileId:String(x.caregiver_profile_id),familyUserId:String(x.family_user_id),recipient:String(x.recipient_name),area:String(x.service_area||""),tasks:String(x.tasks||""),notes:String(x.notes||""),start:String(x.start_time).slice(0,5),end:String(x.end_time).slice(0,5)})));
-    })();return()=>{active=false;};
-  },[path,authUserId,signedIn,userRoles.join(",")]);
-  useEffect(() => {
-    if(!supabase||!userRoles.includes("family")||!requests.length||!path.startsWith("/app")){setRequestMessages({});return;}
-    let active=true;const ids=requests.map(x=>x.id);
-    void supabase.from("care_request_messages").select("request_id,message,sender_user_id,created_at").in("request_id",ids).order("created_at")
-      .then(({data,error})=>{if(!active)return;if(error){console.error("Unable to load request messages",error.message);return;}const grouped:Record<string,Array<{message:string;sender_user_id:string;created_at:string}>>={};(data||[]).forEach((x:any)=>{(grouped[x.request_id]||=[]).push({message:String(x.message),sender_user_id:String(x.sender_user_id),created_at:String(x.created_at)});});setRequestMessages(grouped);});
+      const {data,error}=await client.from("facility_enquiries").select("id,public_reference,facility_id,family_user_id,question,status,created_at,care_facilities!facility_enquiries_facility_id_fkey(name,manager_user_id)").order("created_at",{ascending:false});
+      if(!active)return;
+      if(error){notify("Couldn't load facility enquiries: "+error.message);setFacilityEnquiryRows([]);return;}
+      const rows=(data||[]).filter((row:any)=>{
+        const facility=Array.isArray(row.care_facilities)?row.care_facilities[0]:row.care_facilities;
+        return facility?.manager_user_id===authUserId;
+      }).map((row:any)=>{
+        const facility=Array.isArray(row.care_facilities)?row.care_facilities[0]:row.care_facilities;
+        return {id:String(row.id),reference:String(row.public_reference||String(row.id).slice(0,8)),facilityId:String(row.facility_id),familyUserId:String(row.family_user_id),facilityName:String(facility?.name||"Care facility"),question:String(row.question||""),status:String(row.status).replace(/_/g," "),createdAt:String(row.created_at)};
+      });
+      setFacilityEnquiryRows(rows);
+    })();
     return()=>{active=false;};
-  },[requests.map(x=>x.id+":"+x.status).join(","),path,userRoles.join(",")]);
+  },[path,authUserId,signedIn,userRoles.join(",")]);
+
+  useEffect(() => {
+    const client=supabase;
+    if(!client||(path!=="/care-homes"&&!path.startsWith("/care-homes/")&&path!=="/"))return;
+    let active=true;
+    void client.from("care_facilities").select("id,manager_user_id,name,area,facility_type,description,services,indicative_monthly_fee,availability_note").eq("verification_status","approved").eq("is_published",true).order("created_at",{ascending:false}).then(({data,error})=>{
+      if(!active)return;
+      if(error){console.error("Unable to load care facilities:",error.message);setFacilityListings([]);return;}
+      setFacilityListings((data||[]).map((row:any,index:number)=>{
+        const name=String(row.name||"Care facility");
+        return {id:String(row.id),managerUserId:String(row.manager_user_id),monthlyFee:Number(row.indicative_monthly_fee||0),name,area:String(row.area||"Area not provided"),type:String(row.facility_type||"Residential care"),price:row.indicative_monthly_fee?formatNPR(Number(row.indicative_monthly_fee))+" / month":"Fee on enquiry",services:Array.isArray(row.services)?row.services.map(String):[],updated:String(row.availability_note||"Ask for current availability"),initials:name.split(/\s+/).slice(0,2).map((p:string)=>p[0]?.toUpperCase()||"").join(""),color:["mint","blue","rose"][index%3],desc:String(row.description||"Contact this approved facility to discuss care options and availability.")};
+      }));
+    });
+    return()=>{active=false;};
+  },[path]);
+
+  useEffect(() => {
+    const client=supabase;
+    if(!client||!authUserId||!signedIn||!["/app/messages","/caregiver/messages","/facility/messages"].includes(path)){setConversationList([]);setConversationMessages([]);return;}
+    let active=true;setConversationLoading(true);
+    const load=async(initial=false)=>{
+      const {data,error}=await client.from("conversations").select("id,request_id,created_at,care_requests!conversations_request_id_fkey(id,reference_code,family_user_id,provider_type,caregiver_profile_id,facility_id,service,service_date,start_time,end_time,budget_amount,status,caregiver_profiles!care_requests_caregiver_profile_id_fkey(public_name,user_id),care_facilities!care_requests_facility_id_fkey(name,manager_user_id))").not("request_id","is",null).order("created_at",{ascending:false});
+      if(!active)return;
+      if(error){console.error("Unable to load request conversations:",error.message);if(initial){setConversationList([]);setConversationLoading(false);}return;}
+      const one=(v:any)=>Array.isArray(v)?v[0]:v;
+      const mapped=(data||[]).map((convo:any)=>{
+        const req=one(convo.care_requests);if(!req)return null;
+        const cg=one(req.caregiver_profiles),facility=one(req.care_facilities),providerType=String(req.provider_type||(req.facility_id?"facility":"caregiver")) as "caregiver"|"facility",isFamily=String(req.family_user_id)===authUserId;
+        const partnerUserId=isFamily?String(providerType==="facility"?facility?.manager_user_id||"":cg?.user_id||""):String(req.family_user_id||"");
+        const partnerName=isFamily?String(providerType==="facility"?facility?.name||"Care facility":cg?.public_name||"Caregiver"):"Family · "+String(req.reference_code||"Care request");
+        return {id:String(convo.id),requestId:String(req.id),ref:String(req.reference_code||"Care request"),name:partnerName,partnerUserId,service:String(req.service||"Care request"),date:`${req.service_date} · ${String(req.start_time).slice(0,5)}–${String(req.end_time).slice(0,5)}`,status:String(req.status).replace(/_/g," "),amount:Number(req.budget_amount||0),providerType};
+      }).filter(Boolean) as Array<{id:string;requestId:string;ref:string;name:string;partnerUserId:string;service:string;date:string;status:string;amount:number;providerType:"caregiver"|"facility"}>;
+      setConversationList(mapped);
+      setActiveConversationId((current)=>mapped.some((x)=>x.id===current)?current:(mapped[0]?.id||""));
+      if(initial)setConversationLoading(false);
+    };
+    void load(true);
+    const timer=window.setInterval(()=>void load(false),5000);
+    return()=>{active=false;window.clearInterval(timer);};
+  },[path,authUserId,signedIn,userRoles.join(",")]);
+
+  useEffect(() => {
+    const client=supabase;
+    if(!client||!authUserId||!activeConversationId||!["/app/messages","/caregiver/messages","/facility/messages"].includes(path)){setConversationMessages([]);return;}
+    let active=true;
+    const load=async(initial=false)=>{
+      if(initial)setConversationLoading(true);
+      const {data,error}=await client.from("messages").select("id,sender_user_id,body,ciphertext,iv,created_at").eq("conversation_id",activeConversationId).order("created_at",{ascending:true});
+      if(!active)return;
+      if(error){console.error("Unable to load conversation messages:",error.message);setConversationMessages([]);setConversationLoading(false);return;}
+      const decoded=await Promise.all((data||[]).map(async(row:any)=>{
+        if(row.ciphertext&&row.iv){try{return {id:String(row.id),sender_user_id:String(row.sender_user_id),body:await decryptMessage(client,authUserId,String(row.sender_user_id),String(row.ciphertext),String(row.iv)),created_at:String(row.created_at),encrypted:true};}catch{return {id:String(row.id),sender_user_id:String(row.sender_user_id),body:"Encrypted message unavailable on this device.",created_at:String(row.created_at),encrypted:true};}}
+        return {id:String(row.id),sender_user_id:String(row.sender_user_id),body:row.body?String(row.body)+" (legacy message; sent before client-side encryption)":"This legacy message cannot be displayed securely.",created_at:String(row.created_at),encrypted:false};
+      }));
+      if(active){setConversationMessages(decoded);setConversationLoading(false);}
+    };
+    void load(true);const timer=window.setInterval(()=>void load(false),3500);
+    return()=>{active=false;window.clearInterval(timer);};
+  },[activeConversationId,authUserId,path]);
 
   useEffect(() => {
     if (!["/caregiver", "/caregiver/profile"].includes(path) || !supabase || !authUserId || !userRoles.includes("caregiver")) {
@@ -736,6 +903,54 @@ function App() {
     notify("Profile information updated.");
   };
 
+  const submitFacilityEnquiry = async () => {
+    const client=supabase;
+    const target=selected as FacilityListing|null;
+    if(!client||!authUserId||!userRoles.includes("family")){notify("Sign in with a family account to send a facility enquiry.");return;}
+    if(!target?.id){notify("This facility listing is not available. Please refresh the directory.");return;}
+    if(!query.trim()){notify("Write a question before sending.");return;}
+    setRequestBusy(true);
+    const reference="AE-"+new Date().getFullYear().toString().slice(-2)+String(Math.floor(100000+Math.random()*899999));
+    const {error}=await client.from("facility_enquiries").insert({
+      public_reference:reference,facility_id:target.id,family_user_id:authUserId,
+      question:query.trim(),status:"submitted",
+    });
+    setRequestBusy(false);
+    if(error){notify("Facility enquiry wasn't saved: "+error.message);return;}
+    setModal(null);setQuery("");
+    notify("Your enquiry was sent to the facility. Its status will appear in Care-home enquiries.");
+    if(path==="/app/enquiries") {
+      setFacilityEnquiries(current=>[target.name+" · submitted · "+reference+" · "+query.trim(),...current]);
+    }
+  };
+
+  const saveFacilityListing = async () => {
+    const client=supabase;
+    if(!client||!authUserId||!userRoles.includes("facility_manager")){notify("Sign in with the facility manager account to edit this listing.");return;}
+    if(!ownFacilityProfile?.id){notify("No facility profile is linked to this account yet. Submit a care-home application and ask an administrator to approve it first.");return;}
+    if(!facilityDraft.name.trim()||!facilityDraft.area.trim()){notify("Facility name and service area are required.");return;}
+    const fee=facilityDraft.monthlyFee.trim()===""?null:Number(facilityDraft.monthlyFee);
+    const capacity=facilityDraft.capacity.trim()===""?null:Number(facilityDraft.capacity);
+    if(fee!==null&&(!Number.isFinite(fee)||fee<0)){notify("Enter a valid non-negative monthly fee.");return;}
+    if(capacity!==null&&(!Number.isInteger(capacity)||capacity<0)){notify("Capacity must be a whole number zero or greater.");return;}
+    setFacilitySaving(true);
+    const {error}=await client.from("care_facilities").update({
+      name:facilityDraft.name.trim(),
+      area:facilityDraft.area.trim(),
+      facility_type:facilityDraft.type.trim()||"Residential care",
+      description:facilityDraft.description.trim()||null,
+      services:facilityDraft.services.split(",").map(x=>x.trim()).filter(Boolean),
+      amenities:facilityDraft.amenities.split(",").map(x=>x.trim()).filter(Boolean),
+      capacity,
+      indicative_monthly_fee:fee,
+      availability_note:facilityDraft.availability.trim()||null,
+      updated_at:new Date().toISOString(),
+    }).eq("id",ownFacilityProfile.id).eq("manager_user_id",authUserId);
+    setFacilitySaving(false);
+    if(error){notify("Facility listing couldn't be saved: "+error.message);return;}
+    notify("Facility listing saved. Approval and publication status are unchanged.");
+  };
+
   const updateOwnCaregiverStatus = async (changes: { acceptingRequests?: boolean; isPublished?: boolean }) => {
     if (!supabase || !authUserId || !userRoles.includes("caregiver") || !ownCaregiverStatus) {
       notify("Only the signed-in caregiver can change their own listing status.");
@@ -1101,7 +1316,7 @@ function App() {
         ),
     [caregivers, searchText, serviceFilter, sort],
   );
-  const requestCare = (c: Caregiver) => {
+  const requestCare = (c: Caregiver | FacilityListing) => {
     if (!signedIn) {
       openAuth("signin");
       notify("Sign in to continue your care request.");
@@ -1111,21 +1326,74 @@ function App() {
       notify("Only an account with the assigned family role can request care.");
       return;
     }
+    const isFacility = "managerUserId" in c;
     setSelected(c);
+    setRequest((current) => ({ ...current, area: c.area || current.area, service: isFacility ? "Residential care placement" : current.service, budget: isFacility && c.monthlyFee ? String(c.monthlyFee) : current.budget }));
     setStep(1);
     setModal("request");
   };
   const submitRequest = async () => {
-    if(!supabase||!authUserId||!userRoles.includes("family")){notify("Sign in with a family account to submit a care request.");return;}
-    const caregiver=selected as Caregiver|null;
-    if(!caregiver?.id||!request.recipient||!request.date||!request.area.trim()){notify("Choose a recipient, date and service location.");return;}
+    const client=supabase;
+    if(!client||!authUserId||!userRoles.includes("family")){notify("Sign in with a family account to submit a care request.");return;}
+    const target=selected as Caregiver|FacilityListing|null;
+    const isFacility=!!target&&"managerUserId" in target;
+    if(!target?.id||!request.recipient||!request.date||!request.area.trim()){notify("Choose a recipient, date and service location.");return;}
     if(request.end<=request.start){notify("End time must be later than start time.");return;}
     setRequestBusy(true);
-    const ref="AC-"+new Date().getFullYear().toString().slice(-2)+(new Date().getMonth()+1).toString().padStart(2,"0")+"-"+Math.floor(1000+Math.random()*8999);
-    const mins=(Number(request.end.split(":")[0])*60+Number(request.end.split(":")[1]||0))-(Number(request.start.split(":")[0])*60+Number(request.start.split(":")[1]||0));
-    const {data,error}=await supabase.from("care_requests").insert({reference_code:ref,family_user_id:authUserId,caregiver_profile_id:caregiver.id,recipient_name:request.recipient,service:request.service||"Daily living support",service_date:request.date,start_time:request.start,end_time:request.end,service_area:request.area.trim(),tasks:request.tasks.trim(),notes:request.notes.trim(),budget_amount:Number(request.budget||0)*Math.max(1,mins/60),status:"pending_response"}).select("id").single();
-    setRequestBusy(false);if(error||!data){notify("Request wasn't saved: "+(error?.message||"Try again."));return;}
-    setModal(null);setStep(1);setRequest({recipient:"",service:"",date:"",start:"09:00",end:"12:00",area:"",tasks:"",budget:"",notes:""});go("/app/requests");notify(`Request ${ref} submitted and saved. It is not a confirmed booking.`);
+    const now=new Date(), ref="AC-"+now.getFullYear().toString().slice(-2)+(now.getMonth()+1).toString().padStart(2,"0")+"-"+Math.floor(1000+Math.random()*8999);
+    const minutes=(Number(request.end.split(":")[0])*60+Number(request.end.split(":")[1]||0))-(Number(request.start.split(":")[0])*60+Number(request.start.split(":")[1]||0));
+    const payload={reference_code:ref,family_user_id:authUserId,provider_type:isFacility?"facility":"caregiver",caregiver_profile_id:isFacility?null:target.id,facility_id:isFacility?target.id:null,recipient_name:request.recipient,service:request.service||(isFacility?"Residential care placement":"Daily living support"),service_date:request.date,start_time:request.start,end_time:request.end,service_area:request.area.trim(),tasks:request.tasks.trim(),notes:request.notes.trim(),budget_amount:Number(request.budget||0)*(isFacility?1:Math.max(1,minutes/60)),status:"pending_response"};
+    const {data,error}=await client.from("care_requests").insert(payload).select("id").single();
+    setRequestBusy(false);
+    if(error||!data){notify("Request wasn't saved: "+(error?.message||"Try again."));return;}
+    setModal(null);setStep(1);setRequest({recipient:"",service:"",date:"",start:"09:00",end:"12:00",area:"",tasks:"",budget:"",notes:""});
+    go("/app/requests");notify(`Request ${ref} submitted and saved. The provider can respond before a booking is confirmed.`);
+  };
+
+  const acceptCareRequest = async (item:(typeof requests)[number]) => {
+    const client=supabase;
+    if(!client||!authUserId||!(userRoles.includes("caregiver")||userRoles.includes("facility_manager"))){notify("Sign in with the assigned provider account to respond.");return;}
+    setRequestBusy(true);const {data,error}=await client.rpc("care_request_accept",{p_request_id:item.id});setRequestBusy(false);
+    if(error||!data){notify("Request could not be accepted: "+(error?.message||"Please refresh and try again."));return;}
+    setRequests(current=>current.map(x=>x.id===item.id?{...x,status:"accepted pending terms"}:x));
+    notify("Request accepted. The family has been notified and a private conversation is available. Confirm only after reviewing the details together.");
+    if(path.endsWith("/messages"))setActiveConversationId(String(data));
+  };
+
+  const confirmCareRequest = async (item:(typeof requests)[number]) => {
+    const client=supabase;
+    if(!client||!authUserId||!userRoles.includes("family")){notify("Sign in with the requesting family account to confirm this booking.");return;}
+    setRequestBusy(true);const {data,error}=await client.rpc("care_request_confirm",{p_request_id:item.id});setRequestBusy(false);
+    if(error||data!==true){notify("Booking could not be confirmed: "+(error?.message||"Review the request status and try again."));return;}
+    setRequests(current=>current.map(x=>x.id===item.id?{...x,status:"confirmed"}:x));notify("Booking confirmed. Both parties can continue coordinating in Messages.");
+  };
+
+  const sendRequestMessage = async (item:(typeof requests)[number]) => {
+    const client=supabase,draft=(replyDrafts[item.id]||"").trim();
+    if(!client||!authUserId||!draft)return;
+    if(!item.providerUserId){notify("The assigned provider account could not be found.");return;}
+    setRequestBusy(true);
+    try {
+      const encrypted=await encryptMessage(client,authUserId,item.providerUserId,draft);
+      const {error}=await client.from("care_request_messages").insert({request_id:item.id,sender_user_id:authUserId,message:null,ciphertext:encrypted.ciphertext,iv:encrypted.iv});
+      if(error)throw new Error(error.message);
+      setRequestMessages(current=>({...current,[item.id]:[...(current[item.id]||[]),{message:draft,sender_user_id:authUserId,created_at:new Date().toISOString(),encrypted:true}]}));
+      setReplyDrafts(current=>({...current,[item.id]:""}));notify("Encrypted reply sent to the provider.");
+    } catch(error){notify(error instanceof Error?error.message:"The secure message could not be sent.");}
+    finally{setRequestBusy(false);}
+  };
+
+  const sendChatMessage = async (event:import("react").FormEvent<HTMLFormElement>) => {
+    event.preventDefault();const client=supabase,active=conversationList.find(c=>c.id===activeConversationId),draft=message.trim();
+    if(!client||!authUserId||!active||!draft)return;
+    if(!active.partnerUserId){notify("The other party's account could not be identified.");return;}
+    setRequestBusy(true);
+    try {
+      const encrypted=await encryptMessage(client,authUserId,active.partnerUserId,draft);
+      const {error}=await client.from("messages").insert({conversation_id:active.id,sender_user_id:authUserId,body:null,ciphertext:encrypted.ciphertext,iv:encrypted.iv});
+      if(error)throw new Error(error.message);setMessage("");notify("Encrypted message sent.");
+    } catch(error){notify(error instanceof Error?error.message:"The secure message could not be sent.");}
+    finally{setRequestBusy(false);}
   };
   const publicNav = [
     ["/", t.home],
@@ -1364,6 +1632,8 @@ function App() {
                     ? [
                         ["/facility", LayoutDashboard, "Overview"],
                         ["/facility/listing", House, "Facility listing"],
+                        ["/facility/requests", ClipboardList, "Care requests"],
+                        ["/facility/messages", MessageCircle, "Messages"],
                         ["/facility/enquiries", MessageCircle, "Enquiries"],
                       ]
                     : [
@@ -1479,25 +1749,14 @@ function App() {
             />
           )}
           {path === "/care-homes" && (
-            <CareHomeDirectory
-              onOpen={(f) => {
-                setSelected(f);
-                go("/care-homes/" + f.name.toLowerCase().replaceAll(" ", "-"));
-              }}
-            />
+            <CareHomeDirectory facilities={facilityListings} onOpen={(f: FacilityListing) => { setSelected(f); go("/care-homes/" + f.id); }} />
           )}
           {path.startsWith("/care-homes/") && (
             <FacilityDetail
-              facility={
-                facilities.find((f) =>
-                  path.includes(f.name.toLowerCase().replaceAll(" ", "-")),
-                ) || facilities[0]
-              }
+              facility={facilityListings.find((f) => path.endsWith(f.id) || path.includes(f.name.toLowerCase().replaceAll(" ", "-"))) || facilityListings[0]}
               onBack={() => go("/care-homes")}
-              onEnquire={(f) => {
-                setSelected(f);
-                setModal("enquiry");
-              }}
+              onRequest={(f: FacilityListing) => requestCare(f)}
+              onEnquire={(f: FacilityListing) => { setSelected(f); setModal("enquiry"); }}
             />
           )}
           {path === "/how-it-works" && (
@@ -1821,7 +2080,8 @@ function App() {
               request={request}
               setRequest={setRequest}
               recipientOptions={recipients}
-              caregiver={(selected as Caregiver | null) || caregivers[0]}
+              caregiver={selected}
+              providerType={selected && "managerUserId" in selected ? "facility" : "caregiver"}
               onSubmit={submitRequest}
               onClose={() => setModal(null)}
             />
@@ -1850,19 +2110,10 @@ function App() {
               </label>
               <button
                 className="button button-primary full"
-                onClick={() => {
-                  setFacilityEnquiries((e) => [
-                    `${(selected as any)?.name || "Facility"} · Enquiry sent`,
-                    ...e,
-                  ]);
-                  setModal(null);
-                  setQuery("");
-                  notify(
-                    "This enquiry could not be sent because live enquiry submission is not configured.",
-                  );
-                }}
+                disabled={requestBusy}
+                onClick={() => void submitFacilityEnquiry()}
               >
-                Send enquiry <ArrowRight size={16} />
+                {requestBusy ? "Sending…" : "Send enquiry"} <ArrowRight size={16} />
               </button>
             </div>
           ) : (
@@ -1915,7 +2166,7 @@ function App() {
           )}
         </Modal>
       )}
-      {clarificationFor && <Modal title="Ask the family for details" onClose={()=>setClarificationFor(null)}><div className="modal-form"><p className="muted">Your question will be saved with this request and shown to the family.</p><label>Question<textarea id="clarification-message" rows={4} maxLength={1500}/></label><button className="button button-primary full" disabled={requestBusy} onClick={()=>void(async()=>{const msg=(document.getElementById("clarification-message") as HTMLTextAreaElement|null)?.value.trim()||"";const item=requests.find(x=>x.id===clarificationFor);if(!msg||!item||!supabase||!authUserId){notify("Enter a question before sending.");return;}setRequestBusy(true);const {error}=await supabase.from("care_request_messages").insert({request_id:item.id,sender_user_id:authUserId,message:msg});if(!error&&item.status==="pending response")await supabase.from("care_requests").update({status:"clarification_requested"}).eq("id",item.id).eq("caregiver_profile_id",item.caregiverProfileId).eq("status","pending_response");setRequestBusy(false);if(error){notify("Question wasn't saved: "+error.message);return;}setRequests(xs=>xs.map(x=>x.id===item.id?{...x,status:"clarification requested"}:x));setClarificationFor(null);notify("Question sent to the family.");})()}>Send question <Send size={16}/></button></div></Modal>}
+      {clarificationFor && <Modal title="Ask the family for details" onClose={()=>setClarificationFor(null)}><div className="modal-form"><p className="muted">Your question is encrypted on this device before it is saved.</p><label>Question<textarea id="clarification-message" rows={4} maxLength={1500}/></label><button className="button button-primary full" disabled={requestBusy} onClick={()=>void(async()=>{const msg=(document.getElementById("clarification-message") as HTMLTextAreaElement|null)?.value.trim()||"";const item=requests.find(x=>x.id===clarificationFor);const client=supabase;if(!msg||!item||!client||!authUserId){notify("Enter a question before sending.");return;}setRequestBusy(true);try{const encrypted=await encryptMessage(client,authUserId,item.familyUserId,msg);const {error}=await client.from("care_request_messages").insert({request_id:item.id,sender_user_id:authUserId,message:null,ciphertext:encrypted.ciphertext,iv:encrypted.iv});if(error)throw new Error(error.message);if(item.status==="pending response"){const {error:statusError}=await client.from("care_requests").update({status:"clarification_requested"}).eq("id",item.id).eq("status","pending_response");if(statusError)throw new Error(statusError.message);}setRequests(xs=>xs.map(x=>x.id===item.id?{...x,status:"clarification requested"}:x));setRequestMessages(xs=>({...xs,[item.id]:[...(xs[item.id]||[]),{message:msg,sender_user_id:authUserId,created_at:new Date().toISOString(),encrypted:true}]}));setClarificationFor(null);notify("Encrypted question sent to the family.");}catch(error){notify(error instanceof Error?error.message:"The question could not be sent securely.");}finally{setRequestBusy(false);}})()}>Send question <Send size={16}/></button></div></Modal>}
       {toast && (
         <div className="toast" role="status">
           <CheckCircle2 size={18} />
@@ -2031,10 +2282,10 @@ function App() {
       const visible = requests.filter(
         (r) =>
           activeTab === "All" ||
-          (activeTab === "Requests" && r.status !== "Confirmed") ||
-          (activeTab === "Upcoming" && r.status === "Confirmed") ||
-          (activeTab === "Past" && r.status === "Completed") ||
-          (activeTab === "Cancelled" && r.status === "Cancelled"),
+          (activeTab === "Requests" && r.status !== "confirmed") ||
+          (activeTab === "Upcoming" && r.status === "confirmed") ||
+          (activeTab === "Past" && r.status === "completed") ||
+          (activeTab === "Cancelled" && r.status === "cancelled"),
       );
       return (
         <>
@@ -2072,7 +2323,8 @@ function App() {
                   <span className="eyebrow">{r.ref}</span>
                   <h3>{r.name}</h3>
                   <p>{r.service}</p>
-                  {requestMessages[r.id]?.map((entry,index)=><div className="inline-note" key={entry.created_at+index}><MessageCircle size={15}/>{entry.sender_user_id===authUserId?" Your message: ":" Caregiver asks: "}{entry.message}</div>)}
+                  {requestMessages[r.id]?.map((entry,index)=><div className="inline-note" key={entry.created_at+index}><MessageCircle size={15}/>{entry.sender_user_id===authUserId?" You: ":r.providerType==="facility"?" Facility: ":" Caregiver: "}{entry.message}{!entry.encrypted&&<small> · legacy message</small>}</div>)}
+                  {r.status === "clarification requested" && <div className="request-reply"><label htmlFor={"reply-"+r.id}>Reply to {r.providerType === "facility" ? "facility" : "caregiver"}</label><textarea id={"reply-"+r.id} rows={2} maxLength={1500} value={replyDrafts[r.id]||""} onChange={(event)=>setReplyDrafts(current=>({...current,[r.id]:event.target.value}))} placeholder="Write a reply…"/><button className="button button-secondary small" disabled={requestBusy||!(replyDrafts[r.id]||"").trim()} onClick={()=>void sendRequestMessage(r)}>Send encrypted reply <Send size={14}/></button></div>}
                   <div className="request-meta">
                     <span>
                       <CalendarDays size={14} />
@@ -2088,17 +2340,9 @@ function App() {
                   <StatusPill status={r.status} />
                   <strong>{formatNPR(r.amount)}</strong>
                   <span className="muted tiny">Estimate · not a payment</span>
-                  <button
-                    className="text-link"
-                    onClick={() => {
-                      setSelected(
-                        caregivers.find((c) => c.name === r.name) ||
-                          caregivers[0],
-                      );
-                      go("/app/messages");
-                    }}
-                  >
-                    View details <ArrowRight size={14} />
+                  {r.status === "accepted pending terms" && <button className="button button-primary small" disabled={requestBusy} onClick={()=>void confirmCareRequest(r)}>Confirm booking <CheckCircle2 size={14}/></button>}
+                  <button className="text-link" onClick={() => { if (["accepted pending terms","confirmed","completed"].includes(r.status)) go("/app/messages"); else notify("Messaging opens once the provider accepts this request."); }}>
+                    {["accepted pending terms","confirmed","completed"].includes(r.status) ? "Open conversation" : "View request"} <ArrowRight size={14} />
                   </button>
                 </div>
               </div>
@@ -2207,212 +2451,66 @@ function App() {
         </>
       );
     }
-    if (path === "/app/messages" || path === "/caregiver/messages") {
-      return (
-        <>
-          <PageHeader
-            eyebrow="COMMUNICATION"
-            title="Messages"
-            subtitle="Keep care conversations together, with their booking context."
-          />
-          <div className="messages-layout">
-            <aside className="conversation-list">
-              <button className="conversation active">
-                <div className="mini-avatar rose">MS</div>
-                <span>
-                  <b>{authFullName || profileName || authEmail || "No conversation selected"}</b>
-                  <small>Care request · Daily living</small>
-                  <small className="muted">Today, 10:42 AM</small>
-                </span>
-                <span className="unread-dot" />
-              </button>
-              <button className="conversation">
-                <div className="mini-avatar blue">HC</div>
-                <span>
-                  <b>No facility selected</b>
-                  <small>Facility enquiry</small>
-                  <small className="muted">Yesterday</small>
-                </span>
-              </button>
-            </aside>
-            <section className="chat-panel">
-              <div className="chat-head">
-                <div className="mini-avatar rose">MS</div>
-                <div>
-                  <b>Maya Shrestha</b>
-                  <small>
-                    <span className="online-dot" /> No linked request
-                  </small>
-                </div>
-                <button
-                  className="icon-button"
-                  onClick={() => setModal("incident")}
-                  aria-label="Report concern"
-                >
-                  <Shield size={18} />
-                </button>
-              </div>
-              <div className="chat-context">
-                <CalendarDays size={16} />
-                <span>
-                  <b>Daily living support</b>
-                  <small>Fri, 16 Oct · 9:00–12:00 · Request pending</small>
-                </span>
-                <button onClick={() => go("/app/requests")}>
-                  View request <ArrowRight size={13} />
-                </button>
-              </div>
-              <div className="chat-body">
-                {messages.map((m, i) => (
-                  <div
-                    className={
-                      m.from === "You"
-                        ? "message-bubble sent"
-                        : "message-bubble"
-                    }
-                    key={i}
-                  >
-                    <small>
-                      {m.from} · {m.time}
-                    </small>
-                    <p>{m.text}</p>
-                  </div>
-                ))}
-              </div>
-              <form
-                className="chat-compose"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  if (message.trim()) {
-                    setMessages((m) => [
-                      ...m,
-                      { from: "You", text: message.trim(), time: "Just now" },
-                    ]);
-                    setMessage("");
-                    notify("Message added to local demo only.");
-                  }
-                }}
-              >
-                <input
-                  value={message}
-                  onChange={(e) => setMessage(e.target.value)}
-                  placeholder="Write a message…"
-                  aria-label="Write a message"
-                />
-                <button
-                  className="button button-primary"
-                  aria-label="Send message"
-                >
-                  <Send size={17} />
-                </button>
-              </form>
-              <p className="fineprint">
-                Messages are prototype content. Attachments are disabled in the
-                launch scope.
-              </p>
-            </section>
-          </div>
-        </>
-      );
+    if (path === "/app/messages" || path === "/caregiver/messages" || path === "/facility/messages") {
+      const activeConversation = conversationList.find((conversation) => conversation.id === activeConversationId) || null;
+      return <>
+        <PageHeader eyebrow="COMMUNICATION" title="Messages" subtitle="Real conversations linked to care requests accepted by the provider."/>
+        <div className="messages-layout">
+          <aside className="conversation-list">
+            {conversationLoading&&conversationList.length===0&&<p className="muted" style={{padding:16}}>Loading conversations…</p>}
+            {conversationList.map((conversation)=><button key={conversation.id} className={conversation.id===activeConversationId?"conversation active":"conversation"} onClick={()=>setActiveConversationId(conversation.id)}>
+              <div className="mini-avatar blue">{conversation.name.split(/\s+/).slice(0,2).map((word)=>word[0]||"").join("").toUpperCase()}</div>
+              <span><b>{conversation.name}</b><small>{conversation.ref} · {conversation.service}</small><small className="muted">{conversation.status}</small></span>
+            </button>)}
+            {!conversationLoading&&conversationList.length===0&&<div className="empty-inline" style={{padding:18}}>No conversations yet. Chats appear after a caregiver or facility accepts a care request.</div>}
+          </aside>
+          {activeConversation ? <section className="chat-panel">
+            <div className="chat-head"><div className="mini-avatar blue">{activeConversation.name.split(/\s+/).slice(0,2).map((word)=>word[0]||"").join("").toUpperCase()}</div><div><b>{activeConversation.name}</b><small><span className="online-dot"/> {activeConversation.ref} · {activeConversation.status}</small></div><button className="button button-secondary small" onClick={()=>go(userRoles.includes("family")?"/app/requests":userRoles.includes("facility_manager")?"/facility/requests":"/caregiver/requests")}>View request</button></div>
+            <div className="chat-context"><CalendarDays size={16}/><span><b>{activeConversation.service}</b><small>{activeConversation.date} · {formatNPR(activeConversation.amount)} indicative</small></span>{userRoles.includes("family")&&activeConversation.status==="accepted pending terms"&&<button onClick={()=>{const item=requests.find((row)=>row.id===activeConversation.requestId);if(item)void confirmCareRequest(item);else notify("Open Requests & bookings to confirm this request.");}}>Confirm booking <ArrowRight size={13}/></button>}</div>
+            <div className="chat-body">
+              {conversationLoading&&conversationMessages.length===0&&<p className="muted">Loading messages…</p>}
+              {conversationMessages.map((m)=><div className={m.sender_user_id===authUserId?"message-bubble sent":"message-bubble"} key={m.id}><small>{m.sender_user_id===authUserId?"You":activeConversation.name} · {new Date(m.created_at).toLocaleString()}</small><p>{m.body}</p></div>)}
+              {!conversationLoading&&conversationMessages.length===0&&<div className="empty-inline">Conversation opened. Discuss any changes to care, dates, availability or terms here.</div>}
+            </div>
+            <form className="chat-compose" onSubmit={sendChatMessage}><input value={message} onChange={(event)=>setMessage(event.target.value)} placeholder="Write a secure message…" aria-label="Write a message" maxLength={5000}/><button className="button button-primary" aria-label="Send message" disabled={requestBusy||!message.trim()}><Send size={17}/></button></form>
+            <p className="fineprint">New messages are encrypted in this browser before storage. Your private key stays in this browser profile; clearing its site data or switching devices may make existing encrypted messages unreadable. Older pre-migration messages, if any, are marked as legacy.</p>
+          </section> : <section className="chat-panel"><EmptyState icon={<MessageCircle/>} title="No conversation selected" text="A conversation will appear here after a provider accepts a request." action="View requests" onClick={()=>go(userRoles.includes("family")?"/app/requests":userRoles.includes("facility_manager")?"/facility/requests":"/caregiver/requests")}/></section>}
+        </div>
+      </>;
     }
     if (path === "/app/enquiries") {
-      return (
-        <>
-          <PageHeader
-            eyebrow="FACILITY DISCOVERY"
-            title="Care-home enquiries"
-            subtitle="Track your questions and any proposed visits."
-            action={
-              <button
-                className="button button-secondary"
-                onClick={() => go("/care-homes")}
-              >
-                Explore care homes
-              </button>
-            }
-          />
-          {facilityEnquiries.length ? (
-            facilityEnquiries.map((e, i) => (
-              <div className="request-row" key={i}>
-                <div className="request-icon">
-                  <House />
-                </div>
-                <div className="request-info">
-                  <h3>{e.split(" · ")[0]}</h3>
-                  <p>Facility information request</p>
-                </div>
-                <StatusPill status="Submitted" />
-                <span className="muted">Awaiting follow-up</span>
-              </div>
-            ))
-          ) : (
-            <EmptyState
-              icon={<House />}
-              title="No enquiries yet"
-              text="When you ask a care home a question, its status and next steps will show here."
-              action="Explore care homes"
-              onClick={() => go("/care-homes")}
-            />
-          )}
-        </>
-      );
+      return <>
+        <PageHeader eyebrow="FACILITY DISCOVERY" title="Care-home enquiries" subtitle="Track the actual questions you've sent to care facilities." action={<button className="button button-secondary" onClick={()=>go("/care-homes")}>Explore care homes</button>}/>
+        {facilityEnquiries.length ? facilityEnquiries.map((e,i)=>{
+          const parts=e.split(" · ");
+          return <div className="request-row" key={i}>
+            <div className="request-icon"><House/></div>
+            <div className="request-info"><span className="eyebrow">{parts[2]}</span><h3>{parts[0]}</h3><p>{parts.slice(3).join(" · ")||"Facility information request"}</p><p className="muted">Facility information request</p></div>
+            <StatusPill status={parts[1]||"submitted"}/>
+          </div>;
+        }) : <EmptyState icon={<House/>} title="No enquiries yet" text="When you ask a care home a question, your enquiry and its current status will appear here." action="Explore care homes" onClick={()=>go("/care-homes")}/>}
+      </>;
     }
-    if (path === "/caregiver/requests") {
-      return (
-        <>
-          <PageHeader
-            eyebrow="CAREGIVER SPACE"
-            title="Incoming requests"
-            subtitle="Review requested care and respond only when the details work for you."
-          />
-          <div className="notice-bar">
-            <ShieldCheck size={18} /> Accepting a request creates a pending
-            booking. Confirm only after terms are agreed.
-          </div>
-          {requests.map((r) => (
-            <div className="request-row" key={r.ref}>
-              <div className="request-icon">
-                <ClipboardList />
-              </div>
-              <div className="request-info">
-                <span className="eyebrow">{r.ref}</span>
-                <h3>Family request · {r.service}</h3>
-                <p>{r.date}</p>
-                <p className="muted">
-                  Approximate area: Lalitpur · Tasks: morning routine and light
-                  meal
-                </p>
-              </div>
-              <div className="request-side">
-                <StatusPill status={r.status} />
-                <strong>{formatNPR(r.amount)}</strong>
-                <div className="button-row">
-                  <button
-                    className="button button-secondary small"
-                    onClick={() => setClarificationFor(r.id)}
-                  >
-                    Ask details
-                  </button>
-                  <button
-                    className="button button-primary small"
-                    disabled={requestBusy || r.status !== "pending response"}
-                    onClick={() => void(async()=>{
-                      if(!supabase||!authUserId)return;setRequestBusy(true);
-                      const {data:profile}=await supabase.from("caregiver_profiles").select("id").eq("user_id",authUserId).maybeSingle();
-                      if(!profile){setRequestBusy(false);notify("No caregiver profile is linked to this account.");return;}
-                      const {data,error}=await supabase.from("care_requests").update({status:"accepted_pending_terms",responded_at:new Date().toISOString()}).eq("id",r.id).eq("caregiver_profile_id",profile.id).eq("status","pending_response").select("id").maybeSingle();
-                      setRequestBusy(false);if(error||!data){notify("Request could not be accepted: "+(error?.message||"It may have changed already."));return;}
-                      setRequests(xs=>xs.map(x=>x.id===r.id?{...x,status:"accepted pending terms"}:x));notify("Request accepted. This is not a confirmed booking.");
-                    })()}
-                  >
-                    Accept
-                  </button>
-                </div>
-              </div>
+    if (path === "/caregiver/requests" || path === "/facility/requests") {
+      const facilityWorkspace=path==="/facility/requests";
+      return <>
+        <PageHeader eyebrow={facilityWorkspace?"FACILITY SPACE":"CAREGIVER SPACE"} title={facilityWorkspace?"Incoming care requests":"Incoming requests"} subtitle={facilityWorkspace?"Review family requests for your facility and respond as its authorized manager.":"Review requested care and respond only when the details work for you."}/>
+        <div className="notice-bar"><ShieldCheck size={18}/> Accepting a request opens a private encrypted conversation. A booking is confirmed only after the family reviews and confirms the requested terms.</div>
+        {requests.map((r)=><div className="request-row" key={r.id}>
+          <div className="request-icon">{facilityWorkspace?<House/>:<ClipboardList/>}</div>
+          <div className="request-info"><span className="eyebrow">{r.ref}</span><h3>{r.recipient} · {r.service}</h3><p>{r.date}</p><p className="muted">Requested by a family · {r.area} · {r.tasks||"No additional task details provided."}</p>{r.notes&&<p>{r.notes}</p>}{requestMessages[r.id]?.map((entry,index)=><div className="inline-note" key={entry.created_at+index}><MessageCircle size={14}/>{entry.sender_user_id===authUserId?"You: ":"Family: "}{entry.message}{!entry.encrypted&&<small> · legacy message</small>}</div>)}</div>
+          <div className="request-side"><StatusPill status={r.status}/><strong>{formatNPR(r.amount)}{facilityWorkspace?" / month (indicative)":""}</strong>
+            <div className="button-row">
+              {["pending response","clarification requested"].includes(r.status)&&<button className="button button-secondary small" onClick={()=>setClarificationFor(r.id)} disabled={requestBusy}>Ask details</button>}
+              {["pending response","clarification requested"].includes(r.status)&&<button className="button button-primary small" disabled={requestBusy} onClick={()=>void acceptCareRequest(r)}>Accept request</button>}
+              {["accepted pending terms","confirmed","completed"].includes(r.status)&&<button className="button button-secondary small" onClick={()=>{const chat=conversationList.find((c)=>c.requestId===r.id);if(chat){setActiveConversationId(chat.id);go(facilityWorkspace?"/facility/messages":"/caregiver/messages");}else go(facilityWorkspace?"/facility/messages":"/caregiver/messages");}}>Open conversation <MessageCircle size={14}/></button>}
             </div>
-          ))}
-        </>
-      );
+            {r.status==="accepted pending terms"&&<p className="muted tiny">Accepted; waiting for the family to confirm.</p>}
+            {r.status==="confirmed"&&<p className="muted tiny">Booking confirmed by the family.</p>}
+          </div>
+        </div>)}
+        {requests.length===0&&<EmptyState icon={<ClipboardList/>} title="No incoming requests" text={facilityWorkspace?"Requests for your facility will appear here when families send them.":"New family requests will appear here when families request your services."} action="Open messages" onClick={()=>go(facilityWorkspace?"/facility/messages":"/caregiver/messages")}/>}
+      </>;
     }
     if (path === "/caregiver/schedule") {
       return (
@@ -2544,64 +2642,32 @@ function App() {
       );
     }
     if (path === "/facility/listing") {
-      return (
-        <>
-          <PageHeader
-            eyebrow="FACILITY SPACE"
-            title="Facility listing"
-            subtitle="Review the public information families see."
-          />
-          <div className="form-panel narrow">
-            <label>
-              Facility name
-              <input defaultValue="Himalayan Care Residence" />
-            </label>
-            <label>
-              Services and amenities
-              <textarea
-                rows={3}
-                defaultValue="24-hour assistance, shared rooms, garden"
-              />
-            </label>
-            <label>
-              Indicative monthly fees (NPR)
-              <input defaultValue="38000" type="number" />
-            </label>
-            <div className="inline-note">
-              <Clock3 size={17} /> Listing status: <b>Under review</b>. Only
-              approved facilities can be published.
-            </div>
-            <button
-              className="button button-primary"
-              onClick={() =>
-                notify(
-                  "Draft saved locally. Evidence submission and approval require the backend.",
-                )
-              }
-            >
-              Save draft
-            </button>
-          </div>
-        </>
-      );
+      return <>
+        <PageHeader eyebrow="FACILITY SPACE" title="Facility listing" subtitle="Update the real facility profile associated with your manager account. Approval and publication remain controlled by review."/>
+        {!ownFacilityProfile ? <EmptyState icon={<House/>} title="No facility profile is linked" text="Submit a care-home application first. An administrator creates the facility profile after approval; this screen never creates or publishes a facility by itself." action="View application guidance" onClick={()=>go("/apply/care-home")}/> : <div className="form-panel narrow">
+          <div className="inline-note"><Clock3 size={17}/> Listing status: <b>{ownFacilityProfile.verificationStatus.replace(/_/g," ")}</b> · {ownFacilityProfile.isPublished?"Published":"Not published"}. Editing profile details does not bypass approval.</div>
+          <label>Facility name<input value={facilityDraft.name} onChange={e=>setFacilityDraft(x=>({...x,name:e.target.value}))} required maxLength={160}/></label>
+          <label>Facility type<select value={facilityDraft.type} onChange={e=>setFacilityDraft(x=>({...x,type:e.target.value}))}><option>Residential care</option><option>Assisted living</option><option>Nursing care</option><option>Respite care</option><option>Other</option></select></label>
+          <label>Service area / location<input value={facilityDraft.area} onChange={e=>setFacilityDraft(x=>({...x,area:e.target.value}))} required maxLength={240}/></label>
+          <label>Description<textarea rows={4} value={facilityDraft.description} onChange={e=>setFacilityDraft(x=>({...x,description:e.target.value}))} maxLength={3000}/></label>
+          <label>Services (comma-separated)<textarea rows={2} value={facilityDraft.services} onChange={e=>setFacilityDraft(x=>({...x,services:e.target.value}))} placeholder="Residential support, meals, mobility assistance"/></label>
+          <label>Amenities (comma-separated)<textarea rows={2} value={facilityDraft.amenities} onChange={e=>setFacilityDraft(x=>({...x,amenities:e.target.value}))} placeholder="Accessible bathrooms, garden, shared rooms"/></label>
+          <div className="two-fields"><label>Capacity (beds)<input type="number" min="0" step="1" value={facilityDraft.capacity} onChange={e=>setFacilityDraft(x=>({...x,capacity:e.target.value}))}/></label><label>Indicative monthly fees (NPR)<input type="number" min="0" step="0.01" value={facilityDraft.monthlyFee} onChange={e=>setFacilityDraft(x=>({...x,monthlyFee:e.target.value}))}/></label></div>
+          <label>Availability note<input value={facilityDraft.availability} onChange={e=>setFacilityDraft(x=>({...x,availability:e.target.value}))} maxLength={500} placeholder="Ask us about current room availability"/></label>
+          <button className="button button-primary" disabled={facilitySaving} onClick={()=>void saveFacilityListing()}>{facilitySaving?"Saving…":"Save facility profile"} <Check size={16}/></button>
+        </div>}
+      </>;
     }
     if (path === "/facility/enquiries") {
-      return (
-        <>
-          <PageHeader
-            eyebrow="FAMILY QUESTIONS"
-            title="Enquiries"
-            subtitle="Respond to questions and arrange visits where your team can confirm them."
-          />
-          <EmptyState
-            icon={<MessageCircle />}
-            title="No new enquiries"
-            text="New family questions will appear here once your facility is published and the enquiry API is connected."
-            action="Manage listing"
-            onClick={() => go("/facility/listing")}
-          />
-        </>
-      );
+      return <>
+        <PageHeader eyebrow="FAMILY QUESTIONS" title="Enquiries" subtitle="Read real family enquiries submitted to your facility."/>
+        {facilityEnquiryRows.map((enquiry)=><article className="request-row" key={enquiry.id}>
+          <div className="request-icon"><MessageCircle/></div>
+          <div className="request-info"><span className="eyebrow">{enquiry.reference}</span><h3>{enquiry.facilityName}</h3><p>{enquiry.question||"No question was added."}</p><p className="muted">Received {new Date(enquiry.createdAt).toLocaleString()}</p></div>
+          <div className="request-side"><StatusPill status={enquiry.status}/><button className="button button-secondary small" onClick={()=>go("/facility/requests")}>Care requests <ArrowRight size={14}/></button></div>
+        </article>)}
+        {facilityEnquiryRows.length===0&&<EmptyState icon={<MessageCircle/>} title="No family enquiries yet" text="Questions submitted from your published facility listing will appear here." action="Manage listing" onClick={()=>go("/facility/listing")}/>}
+      </>;
     }
     if (path === "/admin/verifications") {
       const pendingApplications = providerApplications.filter((application) => ["submitted", "under_review", "action_required"].includes(application.status));
@@ -3919,10 +3985,10 @@ function CaregiverProfile({
     </main>
   );
 }
-function CareHomeDirectory({ onOpen }: any) {
+function CareHomeDirectory({ onOpen, facilities: facilityRows }: any) {
   const [area, setArea] = useState("");
   const [type, setType] = useState("All facility types");
-  const list = facilities.filter(
+  const list = facilityRows.filter(
     (f) =>
       (!area ||
         `${f.name} ${f.area}`.toLowerCase().includes(area.toLowerCase())) &&
@@ -4044,7 +4110,8 @@ function CareHomeDirectory({ onOpen }: any) {
     </main>
   );
 }
-function FacilityDetail({ facility: f, onBack, onEnquire }: any) {
+function FacilityDetail({ facility: f, onBack, onEnquire, onRequest }: any) {
+  if (!f) return <main className="page-container info-page"><div className="info-hero"><span className="eyebrow">CARE HOME DIRECTORY</span><h1>Facility details</h1><p>Loading published facilities… If none appear, the directory has no approved and published facilities yet.</p><button className="button button-secondary" onClick={onBack}>Back to care homes</button></div></main>;
   return (
     <main className="page-container profile-page">
       <div className="breadcrumb">
@@ -4080,12 +4147,7 @@ function FacilityDetail({ facility: f, onBack, onEnquire }: any) {
             <b>{f.price}</b>
             <small>Availability {f.updated.toLowerCase()}</small>
           </div>
-          <button
-            className="button button-primary button-large"
-            onClick={() => onEnquire(f)}
-          >
-            Enquire about this facility <ArrowRight size={16} />
-          </button>
+          <div className="button-row"><button className="button button-primary button-large" onClick={() => onRequest(f)}>Request placement <ArrowRight size={16}/></button><button className="button button-secondary" onClick={() => onEnquire(f)}>Ask a question</button></div>
           <p className="fineprint">
             An enquiry is not a confirmed placement. Ask the facility to confirm
             current availability and terms.
@@ -4274,6 +4336,7 @@ function RequestWizard({
   setRequest,
   recipientOptions,
   caregiver,
+  providerType,
   onSubmit,
   onClose,
 }: any) {
@@ -4329,26 +4392,15 @@ function RequestWizard({
       )}
       {step === 2 && (
         <div className="wizard-content">
-          <h3>What support is needed?</h3>
+          <h3>{providerType === "facility" ? "What type of placement do you need?" : "What support is needed?"}</h3>
           <p className="muted">
             Choose a service and describe the tasks that matter. Avoid adding
             unnecessary sensitive details.
           </p>
           <label>
-            Type of support
-            <select
-              value={request.service}
-              onChange={(e) => set("service", e.target.value)}
-            >
-              {[
-                "Companionship",
-                "Daily living support",
-                "Mobility assistance",
-                "Light household support",
-                "Overnight care",
-              ].map((s) => (
-                <option key={s}>{s}</option>
-              ))}
+            {providerType === "facility" ? "Placement type" : "Type of support"}
+            <select value={request.service} onChange={(e) => set("service", e.target.value)}>
+              {(providerType === "facility" ? ["Residential care placement", "Assisted living placement", "Long-term care placement", "Short-term respite placement"] : ["Companionship", "Daily living support", "Mobility assistance", "Light household support", "Overnight care"]).map((service) => <option key={service}>{service}</option>)}
             </select>
           </label>
           <label>
@@ -4419,7 +4471,7 @@ function RequestWizard({
             />
           </label>
           <label>
-            Indicative budget per hour (NPR)
+            {providerType === "facility" ? "Indicative monthly budget (NPR)" : "Indicative budget per hour (NPR)"}
             <input
               type="number"
               min="0"
@@ -4433,7 +4485,7 @@ function RequestWizard({
         <div className="wizard-content">
           <h3>Review before sending</h3>
           <p className="muted">
-            Check the details below. The caregiver may ask questions or propose
+            Check the details below. The provider may ask questions or propose
             changes.
           </p>
           <div className="review-summary">
@@ -4443,13 +4495,13 @@ function RequestWizard({
               </div>
               <div>
                 <b>{caregiver.name}</b>
-                <small>{caregiver.verified}</small>
+                <small>{providerType === "facility" ? "Approved facility listing" : caregiver.verified}</small>
               </div>
               <span className="soft-chip">Request to book</span>
             </div>
             {[
               ["Care recipient", request.recipient],
-              ["Support", request.service],
+              [providerType === "facility" ? "Placement" : "Support", request.service],
               ["Tasks", request.tasks],
               [
                 "Schedule",
@@ -4460,7 +4512,7 @@ function RequestWizard({
               ["Location", request.area],
               [
                 "Indicative rate",
-                `${formatNPR(Number(request.budget || 0))} / hour`,
+                `${formatNPR(Number(request.budget || 0))} / ${providerType === "facility" ? "month" : "hour"}`,
               ],
             ].map(([k, v]: any) => (
               <div className="review-detail" key={k}>
@@ -4473,8 +4525,7 @@ function RequestWizard({
             <InfoIcon />
             <span>
               <b>
-                This sends a request. The booking is not confirmed until the
-                caregiver accepts and the booking is confirmed.
+                This sends a request. The booking is not confirmed until the provider accepts and the family confirms after reviewing the details.
               </b>{" "}
               Online payments are not processed in this MVP. Review cancellation
               terms before confirming.
