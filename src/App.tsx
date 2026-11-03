@@ -565,8 +565,8 @@ function App() {
     }
     let active = true;
     setCaregiverStatusLoading(true);
-    void supabase
-      .rpc("caregiver_get_own_listing_status")
+    const client = supabase;
+    void Promise.resolve(client.rpc("caregiver_get_own_listing_status"))
       .then(({ data, error }) => {
         if (!active) return;
         if (error) {
@@ -751,12 +751,13 @@ function App() {
       path === "/admin" ||
       path.startsWith("/admin/");
     if (!supabase || !needsWorkspaceRole) return;
+    const client = supabase;
 
     let active = true;
     const refreshWorkspaceRoles = async () => {
       // Revalidate permissions in the background without blocking/remounting the page.
       const { data: sessionData, error: sessionError } =
-        await supabase.auth.getSession();
+        await client.auth.getSession();
       if (!active) return;
       if (sessionError || !sessionData.session?.user) {
         setUserRoles([]);
@@ -768,7 +769,7 @@ function App() {
       const userId = sessionData.session.user.id;
       setSignedIn(true);
       setAuthUserId(userId);
-      const { data, error } = await supabase
+      const { data, error } = await client
         .from("user_roles")
         .select("role")
         .eq("user_id", userId);
@@ -1789,12 +1790,12 @@ function App() {
               onHow={() => go("/how-it-works")}
               onRequest={requestCare}
               saved={saved}
-              toggleSaved={(id) =>
+              toggleSaved={(id: string) =>
                 setSaved((s) =>
                   s.includes(id) ? s.filter((x) => x !== id) : [...s, id],
                 )
               }
-              onProfile={(c) => {
+              onProfile={(c: Caregiver) => {
                 if (!signedIn) {
                   setSelected(c);
                   openAuth("signin");
@@ -1818,13 +1819,13 @@ function App() {
               sort={sort}
               setSort={setSort}
               saved={saved}
-              toggleSaved={(id) =>
+              toggleSaved={(id: string) =>
                 setSaved((s) =>
                   s.includes(id) ? s.filter((x) => x !== id) : [...s, id],
                 )
               }
               onRequest={requestCare}
-              onProfile={(c) => {
+              onProfile={(c: Caregiver) => {
                 if (!signedIn) {
                   setSelected(c);
                   openAuth("signin");
@@ -1845,7 +1846,7 @@ function App() {
               onRequest={requestCare}
               onBack={() => go("/caregivers")}
               saved={saved}
-              toggleSaved={(id) =>
+              toggleSaved={(id: string) =>
                 setSaved((s) =>
                   s.includes(id) ? s.filter((x) => x !== id) : [...s, id],
                 )
@@ -2346,60 +2347,13 @@ function App() {
               </div>
             </form>
           </section>
-          {path === "/caregiver/profile" && userRoles.includes("caregiver") && (
-            <section className="panel caregiver-self-service" style={{ maxWidth: 760, padding: 28, marginTop: 20 }}>
-              <PageHeader
-                eyebrow="LISTING CONTROLS"
-                title="Your public availability"
-                subtitle="Manage requests and directory visibility yourself. These preferences do not change your approval status."
-              />
-              {caregiverStatusLoading ? (
-                <p className="muted">Loading your caregiver listing status…</p>
-              ) : !ownCaregiverStatus ? (
-                <p className="muted">No caregiver profile was found for this account. If you recently applied, check your application status.</p>
-              ) : (
-                <>
-                  <div className="caregiver-status-summary">
-                    <span>Verification status</span>
-                    <strong>{ownCaregiverStatus.verificationStatus.replace(/_/g, " ")}</strong>
-                    <span>Directory listing</span>
-                    <strong>{ownCaregiverStatus.isPublished ? "Visible to families" : "Hidden from families"}</strong>
-                    <span>Requests</span>
-                    <strong>{ownCaregiverStatus.acceptingRequests ? "Accepting requests" : "Not accepting requests"}</strong>
-                  </div>
-                  {ownCaregiverStatus.verificationStatus === "approved" ? (
-                    <div className="caregiver-self-service-actions">
-                      <button
-                        className="button button-secondary"
-                        type="button"
-                        disabled={caregiverStatusSaving}
-                        onClick={() => void updateOwnCaregiverStatus({ acceptingRequests: !ownCaregiverStatus.acceptingRequests })}
-                      >
-                        {ownCaregiverStatus.acceptingRequests ? "Pause new requests" : "Start accepting requests"}
-                      </button>
-                      <button
-                        className="button button-primary"
-                        type="button"
-                        disabled={caregiverStatusSaving}
-                        onClick={() => void updateOwnCaregiverStatus({ isPublished: !ownCaregiverStatus.isPublished })}
-                      >
-                        {ownCaregiverStatus.isPublished ? "Hide from listing page" : "List my profile again"}
-                      </button>
-                    </div>
-                  ) : (
-                    <p className="muted">Self-service availability controls become available after an administrator approves your profile. Changing these preferences later will not require another approval.</p>
-                  )}
-                  <p className="muted caregiver-status-note">Hiding your profile removes it from the public directory but does not revoke admin approval. You can list it again whenever you are ready.</p>
-                </>
-              )}
-            </section>
-          )}
         </>
       );
     }
     if (path === "/app/requests/new") {
       return (
         <RequestWizardPage
+          caregivers={caregivers}
           recipients={recipients}
           request={request}
           setRequest={setRequest}
@@ -2687,6 +2641,54 @@ function App() {
             title="Services & rates"
             subtitle="Keep your service scope, pricing basis and availability clear."
           />
+          {userRoles.includes("caregiver") && (
+            <section className="panel caregiver-self-service" style={{ maxWidth: 760, padding: 28, marginTop: 20 }}>
+              <PageHeader
+                eyebrow="LISTING CONTROLS"
+                title="Your public availability"
+                subtitle="Manage requests and directory visibility yourself. These preferences do not change your approval status."
+              />
+              {caregiverStatusLoading ? (
+                <p className="muted">Loading your caregiver listing status…</p>
+              ) : !ownCaregiverStatus ? (
+                <p className="muted">No caregiver profile was found for this account. If you recently applied, check your application status.</p>
+              ) : (
+                <>
+                  <div className="caregiver-status-summary">
+                    <span>Verification status</span>
+                    <strong>{ownCaregiverStatus.verificationStatus.replace(/_/g, " ")}</strong>
+                    <span>Directory listing</span>
+                    <strong>{ownCaregiverStatus.isPublished ? "Visible to families" : "Hidden from families"}</strong>
+                    <span>Requests</span>
+                    <strong>{ownCaregiverStatus.acceptingRequests ? "Accepting requests" : "Not accepting requests"}</strong>
+                  </div>
+                  {ownCaregiverStatus.verificationStatus === "approved" ? (
+                    <div className="caregiver-self-service-actions">
+                      <button
+                        className="button button-secondary"
+                        type="button"
+                        disabled={caregiverStatusSaving}
+                        onClick={() => void updateOwnCaregiverStatus({ acceptingRequests: !ownCaregiverStatus.acceptingRequests })}
+                      >
+                        {ownCaregiverStatus.acceptingRequests ? "Pause new requests" : "Start accepting requests"}
+                      </button>
+                      <button
+                        className="button button-primary"
+                        type="button"
+                        disabled={caregiverStatusSaving}
+                        onClick={() => void updateOwnCaregiverStatus({ isPublished: !ownCaregiverStatus.isPublished })}
+                      >
+                        {ownCaregiverStatus.isPublished ? "Hide from listing page" : "List my profile again"}
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="muted">Self-service availability controls become available after an administrator approves your profile. Changing these preferences later will not require another approval.</p>
+                  )}
+                  <p className="muted caregiver-status-note">Hiding your profile removes it from the public directory but does not revoke admin approval. You can list it again whenever you are ready.</p>
+                </>
+              )}
+            </section>
+          )}
           <div className="form-panel narrow">
             <label>
               Profile headline
@@ -4125,7 +4127,7 @@ function CareHomeDirectory({ onOpen, facilities: facilityRows }: any) {
   const [area, setArea] = useState("");
   const [type, setType] = useState("All facility types");
   const list = facilityRows.filter(
-    (f) =>
+    (f: FacilityListing) =>
       (!area ||
         `${f.name} ${f.area}`.toLowerCase().includes(area.toLowerCase())) &&
       (type === "All facility types" || f.type === type),
@@ -4175,7 +4177,7 @@ function CareHomeDirectory({ onOpen, facilities: facilityRows }: any) {
         </button>
       </div>
       <div className="facility-grid">
-        {list.map((f) => (
+        {list.map((f: FacilityListing) => (
           <article className="facility-card" key={f.name}>
             <div className={`facility-art ${f.color}`}>
               <div className="facility-art-mark">
@@ -4192,7 +4194,7 @@ function CareHomeDirectory({ onOpen, facilities: facilityRows }: any) {
               </div>
               <p>{f.desc}</p>
               <div className="facility-tags">
-                {f.services.map((s) => (
+                {f.services.map((s: string) => (
                   <span className="tag" key={s}>
                     {s}
                   </span>
@@ -4725,6 +4727,7 @@ function RequestWizard({
   );
 }
 function RequestWizardPage({
+  caregivers = [],
   recipients,
   request,
   setRequest,
